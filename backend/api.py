@@ -37,19 +37,21 @@ class ResearchResponse(BaseModel):
 
 @app.get("/")
 def root():
+    cfg = config.get_config()
     return {
         "service": "Autonomous Market Intelligence API",
-        "active_provider": config.PROVIDER.upper(),
+        "active_provider": cfg["PROVIDER"].upper(),
         "status": "online"
     }
 
 @app.get("/api/health")
 def health_check():
+    cfg = config.get_config()
     return {
         "status": "healthy",
-        "llm_provider": config.PROVIDER,
-        "gemini_configured": bool(config.GEMINI_API_KEY),
-        "groq_configured": bool(config.GROQ_API_KEY)
+        "llm_provider": cfg["PROVIDER"],
+        "gemini_configured": bool(cfg["GEMINI_API_KEY"]),
+        "groq_configured": bool(cfg["GROQ_API_KEY"])
     }
 
 @app.post("/api/research", response_model=ResearchResponse)

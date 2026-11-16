@@ -57,6 +57,9 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
     known_tickers = {
         "systems limited": "SYS.KA",
         "systems": "SYS.KA",
+        "netsol": "NTWK",
+        "netsol technologies": "NTWK",
+        "ntwk": "NTWK",
         "apple": "AAPL", "aapl": "AAPL",
         "nvidia": "NVDA", "nvda": "NVDA",
         "microsoft": "MSFT", "msft": "MSFT",

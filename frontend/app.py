@@ -98,7 +98,9 @@ with st.sidebar:
         st.success(f"🟢 **FastAPI Backend**: Online")
         st.info(f"⚡ **Active LLM**: {provider_name}")
     else:
-        st.warning("🟡 **FastAPI Backend**: Offline (Direct Agent Mode Active)")
+        from config import get_config
+        cfg = get_config()
+        st.info(f"🟡 **Direct Agent Mode** | ⚡ **Active LLM**: {cfg['PROVIDER'].upper()}")
         
     st.divider()
     st.markdown("### 💡 Quick Search Examples")
