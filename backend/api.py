@@ -1,0 +1,100 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
+import os
+from agents.supervisor import ResearchSupervisor
+import config
+
+app = FastAPI(
+    title="Autonomous Market Intelligence Multi-Agent API",
+    description="Backend API powering the Parent-Subagents Market Research System",
+    version="1.0.0"
+)
+
+# Enable CORS for frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+supervisor = ResearchSupervisor()
+
+class ResearchRequest(BaseModel):
+    target: str
+
+class ResearchResponse(BaseModel):
+    status: str
+    target: str
+    is_public: bool
+    dossier: Dict[str, Any]
+    pdf_filename: str
+    md_filename: str
+
+@app.get("/")
+def root():
+    return {
+        "service": "Autonomous Market Intelligence API",
+        "active_provider": config.PROVIDER.upper(),
+        "status": "online"
+    }
+
+@app.get("/api/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "llm_provider": config.PROVIDER,
+        "gemini_configured": bool(config.GEMINI_API_KEY),
+        "groq_configured": bool(config.GROQ_API_KEY)
+    }
+
+@app.post("/api/research", response_model=ResearchResponse)
+def conduct_research(request: ResearchRequest):
+    """
+    Main Multi-Agent Orchestration Endpoint.
+    Parent Agent delegates to Financial, News, and Biographer subagents,
+    synthesizes intelligence, and generates reports.
+    """
+    target = request.target.strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Target company name or ticker is required.")
+        
+    try:
+        results = supervisor.run_investigation(target)
+        dossier = results["dossier"]
+        pdf_path = results["pdf_path"]
+        md_path = results["md_path"]
+        
+        pdf_filename = os.path.basename(pdf_path)
+        md_filename = os.path.basename(md_path)
+        
+        return {
+            "status": "success",
+            "target": target,
+            "is_public": dossier.get("is_public", False),
+            "dossier": dossier,
+            "pdf_filename": pdf_filename,
+            "md_filename": md_filename
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Multi-Agent investigation failed: {str(e)}")
+
+@app.get("/api/reports/{filename}")
+def download_report(filename: str):
+    """
+    Serve generated PDF and Markdown dossiers directly to clients.
+    """
+    file_path = os.path.join("reports", filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Requested report file was not found.")
+        
+    media_type = "application/pdf" if filename.endswith(".pdf") else "text/markdown"
+    return FileResponse(file_path, media_type=media_type, filename=filename)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("backend.api:app", host="127.0.0.1", port=8000, reload=True)

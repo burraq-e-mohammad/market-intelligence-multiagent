@@ -1,0 +1,13 @@
+yfinance>=0.2.36
+duckduckgo-search>=6.0.0
+ddgs>=9.0.0
+wikipedia-api>=0.6.0
+fpdf2>=2.7.9
+python-dotenv>=1.0.0
+rich>=13.7.0
+requests>=2.31.0
+google-genai>=0.1.0
+openai>=1.14.0
+fastapi>=0.110.0
+uvicorn>=0.28.0
+streamlit>=1.32.0
