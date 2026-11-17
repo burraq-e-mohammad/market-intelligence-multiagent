@@ -9,18 +9,19 @@ class BiographyAgent(BaseAgent):
             role="Chief Corporate Historian & Strategic Moat Analyst",
             system_prompt="""You are a senior corporate historian and strategic enterprise analyst.
 Your job is to provide an in-depth, structured, and comprehensive corporate biography for the target enterprise.
-Do NOT give a short or superficial 2-line summary. Provide thorough analysis across 3 clearly marked sections:
+Do NOT give a short or superficial summary. Never output apologies, refusal disclaimers, or meta-commentary about missing data.
+If the company is a privately held or unlisted technology enterprise, synthesize its commercial footprint, core engineering offerings, strategic acquisitions, awards, and market delivery scale into 3 clearly marked sections:
 ### 1. Foundational History, Origins & Leadership Milestones
-Detail the founding era, key founders, initial mission, corporate restructuring, and historic inflection points.
+Detail the founding era, commercial evolution, geographic delivery footprint, major acquisitions, and key corporate inflection points.
 ### 2. Core Business Divisions, Solutions & Ecosystem
-Explain what the company actually builds, its primary service lines, technology offerings, and major operating subsidiaries.
+Explain what the company actually builds, its primary service lines (e.g. digital transformation, product engineering, cloud, AI, cybersecurity), and enterprise industry solutions.
 ### 3. Competitive Moat & Strategic Industry Positioning
-Analyze their structural advantages (switching costs, proprietary architecture, domain expertise, partnerships, or scale)."""
+Analyze structural advantages (domain engineering talent, enterprise client retention, specialized vertical consulting, and technology partnerships)."""
         )
 
     def analyze(self, company_name: str) -> Dict[str, Any]:
         """
-        1. Calls the biography tool (Wikipedia recursive sections or verified web profile).
+        1. Calls the biography tool (Wikipedia verified sections or corporate media announcements).
         2. Reasons through corporate history and moat using the LLM.
         3. Returns structured, extensive corporate background.
         """
@@ -29,16 +30,19 @@ Analyze their structural advantages (switching costs, proprietary architecture, 
         summary = tool_result.get("summary", "")
         detailed_content = tool_result.get("detailed_content", summary)
 
-        prompt = f"""Write an extensive, comprehensive corporate biography for {company_name} based on this verified {source} data:
+        prompt = f"""You are the Chief Corporate Historian & Strategic Enterprise Analyst.
+Synthesize an authoritative, comprehensive corporate biography for {company_name} based on this verified {source} intelligence:
 
 {detailed_content}
 
-Structure your response into 3 detailed sections:
+Strict Output Requirements:
+1. Deliver comprehensive, professional, multi-paragraph corporate analysis.
+2. Structure your response into exactly 3 detailed sections:
 ### 1. Foundational History, Origins & Leadership Milestones
 ### 2. Core Business Divisions, Solutions & Ecosystem
 ### 3. Competitive Moat & Strategic Industry Positioning
-
-Be thorough, factual, and informative. Cite specific years, founders, subsidiaries, and products mentioned above."""
+3. Synthesize all verified commercial milestones, acquisitions, recognitions, and technology services mentioned above.
+4. Do NOT output disclaimers, apologies, or meta-notes. Write an authoritative, executive-level corporate biography."""
 
         llm_analysis = self.generate_response(prompt)
         
