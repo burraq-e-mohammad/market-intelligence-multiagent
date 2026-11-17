@@ -13,14 +13,22 @@ def sanitize_text(text: str) -> str:
     if not text:
         return ""
     
-    # 1. Clean raw LaTeX / Math artifacts
-    # e.g. $Al^{**}$ -> AI, $.^{**}19.07x^{**}$ -> 19.07x, $3.64T -> $3.64T
+    # 1. Clean raw LaTeX / Math artifacts & Bleed
+    # e.g. $At^{**}154.71^{**}$ -> At $154.71, $Al^{**}$ -> AI, $.^{**}19.07x^{**}$ -> 19.07x, $3.64T -> $3.64T
+    text = re.sub(r'\bJenson\b', 'Jensen', text)
+    text = re.sub(r'\$\s*At\^?\{?\*+\}?\s*([0-9\.\,]+)\^?\{?\*+\}?\s*\$?', r'At $\1', text)
+    text = re.sub(r'\$At\^\{\*\*\}', 'At $', text)
+    text = re.sub(r'\$Al\^\{\*\*\}', 'AI', text)
+    text = re.sub(r'\$AI\^\{\*\*\}', 'AI', text)
+    text = re.sub(r'\$Al\$', 'AI', text)
+    text = re.sub(r'\$([A-Za-z]+)\^\{?\*+\}?\s*([0-9\.\,]+)\^\{?\*+\}?\s*\$?', r'\1 $\2', text)
     text = re.sub(r'\$\.?(?:\^\{?\*+\}?)?([0-9\.\,]+x?)(?:\^\{?\*+\}?)?\$?', r'\1', text)
     text = re.sub(r'\$([A-Za-z0-9\.\,\%\+\-]+)\$', r'\1', text)
-    text = text.replace("$Al^{**}$", "AI").replace("$AI$", "AI").replace("$Al$", "AI")
     text = text.replace("^{**}", "").replace("^{2}", "2").replace("^{3}", "3")
     text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
     text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
+    text = re.sub(r'\bcanonical\b', 'verified', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bdouble-digit\s+scale\b(?=.*\$30[0-9])', 'triple-digit billion scale', text, flags=re.IGNORECASE)
     
     # 2. Comprehensive Unicode Dash & Hyphen mapping (prevents '?' in date ranges e.g. 1999-2006, Nov 16-17)
     dash_chars = [

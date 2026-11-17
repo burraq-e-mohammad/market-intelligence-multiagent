@@ -119,11 +119,11 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Microsoft", use_container_width=True): preset = "Microsoft"
-        if st.button("NVIDIA", use_container_width=True): preset = "NVDA"
-        if st.button("Apple", use_container_width=True): preset = "AAPL"
+        if st.button("NVIDIA", use_container_width=True): preset = "NVIDIA"
+        if st.button("Apple", use_container_width=True): preset = "Apple"
     with col2:
         if st.button("OpenAI", use_container_width=True): preset = "OpenAI"
-        if st.button("Tesla", use_container_width=True): preset = "TSLA"
+        if st.button("Tesla", use_container_width=True): preset = "Tesla"
         if st.button("Amazon", use_container_width=True): preset = "Amazon"
 
 # Header
@@ -250,11 +250,24 @@ if execute_btn or preset:
                 
             if pdf_bytes:
                 import re
-                clean_fname = re.sub(r'[^a-zA-Z0-9]', '_', query_target).lower()
+                comp_clean = query_target.strip().upper()
+                if comp_clean in ["NVDA", "NVIDIA"] or "nvidia" in dossier.get("company_name", "").lower():
+                    file_base = "nvidia"
+                elif comp_clean in ["AAPL", "APPLE"] or "apple" in dossier.get("company_name", "").lower():
+                    file_base = "apple"
+                elif comp_clean in ["TSLA", "TESLA"] or "tesla" in dossier.get("company_name", "").lower():
+                    file_base = "tesla"
+                elif comp_clean in ["MSFT", "MICROSOFT"] or "microsoft" in dossier.get("company_name", "").lower():
+                    file_base = "microsoft"
+                elif comp_clean in ["AMZN", "AMAZON"] or "amazon" in dossier.get("company_name", "").lower():
+                    file_base = "amazon"
+                else:
+                    file_base = re.sub(r'[^a-zA-Z0-9]+', '_', query_target).strip('_').lower()
+                
                 st.download_button(
                     label="📥 Download Executive PDF Dossier",
                     data=pdf_bytes,
-                    file_name=f"{clean_fname}_intelligence_dossier.pdf",
+                    file_name=f"{file_base}_intelligence_dossier.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
