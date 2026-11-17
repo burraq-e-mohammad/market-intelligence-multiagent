@@ -12,11 +12,10 @@ Your job is to provide an in-depth, structured financial evaluation. Do NOT writ
 You MUST adhere strictly to the Single Source of Truth provided in the prompt.
 CRITICAL ARITHMETIC & FACTUAL RULES:
 1. Never fabricate, guess, or recalculate financial ratios, share prices, or market caps. Use ONLY the verified metrics provided.
-2. The provided revenue figure is strictly Trailing Twelve Months (TTM) GAAP revenue. For mega-cap enterprises with >$300B revenue, accurately refer to this as 'triple-digit billion scale' (NEVER describe it as 'double-digit scale').
-3. PEG Ratio Calculation: The PEG ratio is determined by Forward P/E divided by consensus 3-5 year expected EPS growth (~48-50%), NOT revenue growth. Under NO circumstances divide Forward P/E by revenue growth to reverse-engineer the PEG.
+2. The provided revenue figure is strictly Trailing Twelve Months (TTM) GAAP revenue. Accurately characterize revenue volume according to its verified scale descriptor (e.g. trillion-dollar, triple-digit billion, or multi-billion scale; never describe a hundred-billion scale as 'double-digit scale').
+3. PEG Ratio Calculation: The PEG ratio is mathematically defined as Forward P/E divided by consensus long-term expected EPS compound growth, NOT revenue growth. Under NO circumstances divide Forward P/E by revenue growth to reverse-engineer the PEG.
 4. FORBIDDEN PROMPT LEAKAGE WORDS: NEVER use meta words like 'canonical', 'the provided', 'supplied table', 'in the prompt', or 'our benchmark' in your analysis text. Write exclusively in the independent, professional voice of an institutional managing director.
-5. Do NOT invent forward dollar projections or build tables with unverified segment numbers that do not sum to the verified total.
-6. Always ensure proper spelling of corporate leadership (e.g., 'Jensen Huang')."""
+5. Do NOT invent forward dollar projections or build tables with unverified segment numbers that do not sum to the verified total."""
         )
 
     def analyze(self, query_or_ticker: str, shared_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -38,6 +37,8 @@ CRITICAL ARITHMETIC & FACTUAL RULES:
             peg_val = metrics.get('peg_ratio', 'N/A')
             fwd_pe_val = metrics.get('forward_pe', 'N/A')
             rev_val = metrics.get('total_revenue', 'N/A')
+            scale_desc = metrics.get('revenue_scale_descriptor', 'commercial scale')
+            peg_rationale = metrics.get('peg_rationale', 'PEG reflects multiple valuation against consensus multi-year EPS growth.')
             
             prompt = f"""Evaluate these verified financial metrics for {metrics.get('company_name')} ({metrics.get('symbol')}):
 
@@ -48,8 +49,8 @@ VERIFIED FINANCIAL METRICS (SINGLE SOURCE OF TRUTH):
 - Market Capitalization: {metrics.get('market_cap')}
 - Trailing P/E Ratio: {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))}
 - Forward P/E Ratio: {fwd_pe_val}
-- PEG Ratio: {peg_val} (Reflects Forward P/E divided by long-term EPS growth of ~48-50%, NOT revenue growth)
-- TTM Revenue (Trailing 12 Months): {rev_val} (Triple-digit billion scale; do NOT label as FY annual actuals)
+- PEG Ratio: {peg_val} ({peg_rationale})
+- TTM Revenue (Trailing 12 Months): {rev_val} ({scale_desc}; do NOT label as FY annual actuals)
 - Operating Margin: {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))}
 - Net Profit Margin: {metrics.get('profit_margins')}
 - Revenue Growth (YoY): {metrics.get('revenue_growth_yoy', 'N/A')}
@@ -59,8 +60,8 @@ VERIFIED FINANCIAL METRICS (SINGLE SOURCE OF TRUTH):
 TEMPORAL ANCHOR & ARITHMETIC CONSTRAINTS:
 1. Current calendar year is 2026.
 2. Strictly maintain internal consistency with the numbers above. Do not alter, round differently, or contradict any verified metric.
-3. PEG Ratio Guidance: A PEG ratio of {peg_val} indicates that the stock trades at an attractive multiple relative to its ~49% EPS growth rate. Never calculate PEG by dividing Forward P/E by revenue growth.
-4. Scale Guidance: When referencing TTM revenue ({rev_val}), describe it as triple-digit billion scale (never double-digit scale).
+3. PEG Ratio Guidance: {peg_rationale} Never calculate PEG by dividing Forward P/E by revenue growth.
+4. Scale Guidance: When referencing TTM revenue ({rev_val}), describe it as {scale_desc}.
 5. NEGATIVE CONSTRAINT: NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt' in your text.
 6. Structure your qualitative commentary across these 3 sections:
 ### 1. Valuation Architecture & Multiple Dynamics
@@ -77,13 +78,13 @@ Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_mar
                     f"{metrics.get('company_name')} ({metrics.get('symbol')}) trades on the {metrics.get('exchange', 'Stock Exchange')} "
                     f"commanding an aggregate market capitalization of {metrics.get('market_cap')}. "
                     f"The equity commands a trailing price-to-earnings (P/E) multiple of {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))} and a forward P/E of {metrics.get('forward_pe', 'N/A')}. "
-                    f"With a PEG ratio of {peg_val}, valuation remains anchored to robust long-term earnings per share (EPS) compound growth rather than short-term multiple expansion.\n\n"
+                    f"With a PEG ratio of {peg_val}, {peg_rationale}\n\n"
                     f"### 2. Trading Corridor & Price Discovery Dynamics\n"
                     f"Currently priced at {metrics.get('current_price')}, the equity oscillates within its verified 52-week corridor of {metrics.get('52_week_low')} - {metrics.get('52_week_high')}. "
                     f"This trading channel underscores liquidity depth and market re-rating amidst macroeconomic interest rate shifts.\n\n"
                     f"### 3. Operating Profitability, Margins & Consensus Outlook\n"
                     f"Core fundamentals indicate operating margins of {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))} and net profit margins of {metrics.get('profit_margins')} "
-                    f"against triple-digit billion TTM revenue volumes of {rev_val}. "
+                    f"against {scale_desc} TTM revenue volumes of {rev_val}. "
                     f"Wall Street sell-side consensus stands at {metrics.get('analyst_rating')} with a mean 12-month target of {metrics.get('analyst_target_price')}."
                 )
         else:

@@ -250,18 +250,10 @@ if execute_btn or preset:
                 
             if pdf_bytes:
                 import re
-                comp_clean = query_target.strip().upper()
-                if comp_clean in ["NVDA", "NVIDIA"] or "nvidia" in dossier.get("company_name", "").lower():
-                    file_base = "nvidia"
-                elif comp_clean in ["AAPL", "APPLE"] or "apple" in dossier.get("company_name", "").lower():
-                    file_base = "apple"
-                elif comp_clean in ["TSLA", "TESLA"] or "tesla" in dossier.get("company_name", "").lower():
-                    file_base = "tesla"
-                elif comp_clean in ["MSFT", "MICROSOFT"] or "microsoft" in dossier.get("company_name", "").lower():
-                    file_base = "microsoft"
-                elif comp_clean in ["AMZN", "AMAZON"] or "amazon" in dossier.get("company_name", "").lower():
-                    file_base = "amazon"
-                else:
+                comp_name = dossier.get("company_name", query_target)
+                first_word = comp_name.split()[0] if comp_name else query_target
+                file_base = re.sub(r'[^a-zA-Z0-9]+', '', first_word).lower()
+                if not file_base or len(file_base) < 2:
                     file_base = re.sub(r'[^a-zA-Z0-9]+', '_', query_target).strip('_').lower()
                 
                 st.download_button(

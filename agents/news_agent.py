@@ -10,39 +10,43 @@ class NewsScoutAgent(BaseAgent):
             system_prompt="""You are a lead corporate event and market sentiment analyst at an elite financial intelligence firm.
 Analyze recent media developments thoroughly. Do NOT write a superficial summary.
 You MUST maintain strict consistency with the Single Source of Truth:
-1. NEVER cite or hallucinate an outdated or pre-split share price (e.g. $800+ for Nvidia) as the current price. The only current price is the verified market quote.
-2. For leadership changes (e.g., CEO, Chairman, CFO), report strictly verified announcements. For NVIDIA: Jensen Huang resigned on November 12, 2026 (Q4 FY27, NOT Q3); CFO Colette Kress was appointed Interim CEO, and Harvey C. Jones became Chair of the Board. NVIDIA does NOT have a COO.
-3. For technological cycles, anchor to calendar year 2026. Do NOT present legacy architectures (e.g. Hopper H100/H200 from 2022-2024) as "upcoming" catalysts.
-4. Regulatory & Geopolitical Risk: In Section 3, explicitly evaluate trade compliance and export-control investigations (e.g., Megaspeed / China export scrutiny and the National Security and Export Control Oversight Committee).
+1. NEVER cite or hallucinate an outdated or pre-split share price as the current price. The only current price is the verified market quote.
+2. For leadership changes (e.g., CEO, Chairman, CFO), report strictly verified announcements. Synthesize leadership transitions accurately without contradiction.
+3. For technological cycles, anchor to calendar year 2026. Do NOT present legacy architectures from prior years as "upcoming" catalysts.
+4. Regulatory & Geopolitical Risk: In Section 3, explicitly evaluate trade compliance, antitrust inquiries, regulatory probes, or legal oversight.
 5. NEGATIVE CONSTRAINT: NEVER use meta words like 'canonical', 'provided', or 'prompt' in your output.
 Provide an in-depth, structured briefing across 3 clear sections:
 ### 1. Macro Sentiment & Media Narrative
 Diagnose whether coverage is bullish, bearish, or cautiously observant, explaining market tone.
 ### 2. Key Catalysts, Commercial Deals & Operational Milestones
-Highlight specific announcements, customer adoptions, financial disclosures, or strategic shifts.
+Highlight specific announcements, customer adoptions, financial disclosures, or strategic leadership shifts.
 ### 3. Strategic Risks & Competitive Pressures
-Outline emerging risks, market vulnerabilities, export-control investigations, or competitor maneuvers."""
+Outline emerging risks, market vulnerabilities, export-control or regulatory investigations, and competitor maneuvers."""
         )
 
     def analyze(self, company_name: str, symbol: str = "", shared_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         1. Calls the news tool to fetch recent articles for public or private firms.
         2. Reasons through recent events using the LLM with locked canonical state.
-        3. Returns structured sentiment & news summary.
+        3. Returns structured sentiment & news summary with dynamically detected events.
         """
         tool_result = get_company_news(company_name, symbol=symbol, max_results=6)
         articles: List[Dict[str, str]] = tool_result.get("articles", [])
+        detected_events = tool_result.get("detected_events", {})
         
+        gov_events = detected_events.get("governance_events", [])
+        reg_risks = detected_events.get("regulatory_risks", [])
+        comm_milestones = detected_events.get("commercial_milestones", [])
+
         market_price = shared_state.get("current_price", "") if shared_state else ""
         market_cap = shared_state.get("market_cap", "") if shared_state else ""
-        gov_text = shared_state.get("executive_governance", "") if shared_state else ""
-        reg_risk = shared_state.get("regulatory_risk", "") if shared_state else ""
 
         if not articles:
             return {
                 "status": "empty",
                 "articles": [],
-                "analysis": f"### Market Sentiment Overview\nNo recent breaking media reports discovered for {company_name}."
+                "analysis": f"### Market Sentiment Overview\nNo recent breaking media reports discovered for {company_name}.",
+                "detected_events": detected_events
             }
 
         # Format headlines for LLM prompt
@@ -57,18 +61,19 @@ VERIFIED MARKET STATE (SINGLE SOURCE OF TRUTH):
 - Market Capitalization: {market_cap if market_cap else 'Refer to verified cap'}
 - Temporal Anchor: Current Calendar Year is 2026
 
-VERIFIED CORPORATE GOVERNANCE & REGULATORY DRIVERS:
-{gov_text}
-{reg_risk}
+DYNAMICALLY DETECTED CORPORATE CATALYSTS & RISKS:
+- Breaking Governance & Leadership Shifts: {"; ".join(gov_events) if gov_events else 'Standard corporate leadership structure'}
+- Regulatory, Antitrust & Compliance Inquiries: {"; ".join(reg_risks) if reg_risks else 'Standard regulatory trade compliance'}
+- Commercial & Product Milestones: {"; ".join(comm_milestones) if comm_milestones else 'Active commercial delivery'}
 
 VERIFIED NEWS HEADLINES & MEDIA STREAM:
 {headlines_text}
 
 CRITICAL CONSISTENCY & FACTUAL DIRECTIVES:
-1. Under NO circumstances cite a historical or pre-split share price (e.g. $800+ before the 2024 split) as the current price. The only current trading price is {market_price}.
-2. Leadership Transitions: Accurately synthesize governance. For NVIDIA, Jensen Huang resigned on November 12, 2026 (Q4 FY27, NOT Q3). Colette Kress is Interim CEO and Harvey C. Jones is Board Chair. NVIDIA operates without a COO; never state a COO was appointed.
-3. In Section 3 (Strategic Risks & Competitive Pressures), detail the Megaspeed & China export-control compliance investigation, and the formation of the National Security and Export Control Oversight Committee in November 2026.
-4. Product Roadmap: In 2026, Blackwell is active and Rubin is next-generation. Do not cite Hopper (H100/H200) as future catalysts.
+1. Under NO circumstances cite a historical or pre-split share price as the current price. The only current trading price is {market_price}.
+2. Leadership Transitions: Accurately synthesize governance. Detail any breaking executive appointments or resignations from the detected catalysts above.
+3. In Section 3 (Strategic Risks & Competitive Pressures), detail any verified regulatory investigations, export control compliance inquiries, or legal scrutiny identified in the headlines.
+4. Product Roadmap: Anchor strictly to 2026. Do not present multi-year-old architectures as upcoming catalysts.
 5. NEGATIVE CONSTRAINT: NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt' in your text.
 
 Format strictly into 3 sections:
@@ -81,33 +86,33 @@ Deliver an in-depth, professional briefing."""
         llm_analysis = self.generate_response(prompt)
         
         # Dynamic fallback if in heuristic mode
-        if "Report]" in llm_analysis:
-            if "nvidia" in company_name.lower() or symbol == "NVDA":
-                llm_analysis = (
-                    "### 1. Macro Sentiment & Media Narrative\n"
-                    "Media coverage and institutional sentiment around NVIDIA reflect sustained commercial demand for enterprise AI accelerators, "
-                    "balanced by close market observation following executive leadership transitions and geopolitical export controls.\n\n"
-                    "### 2. Key Catalysts, Commercial Deals & Operational Milestones\n"
-                    "Key recent developments include the executive appointment of CFO Colette Kress as Interim CEO and Harvey C. Jones as Board Chair on November 12, 2026 (Q4 FY27) following Jensen Huang's resignation. "
-                    "Commercial momentum remains robust with accelerated shipments of Blackwell AI servers across major cloud hyperscalers.\n\n"
-                    "### 3. Strategic Risks & Competitive Pressures\n"
-                    "A primary regulatory observation point remains the Megaspeed and China export-control compliance investigation, prompting the Board of Directors to establish the dedicated National Security and Export Control Oversight Committee in November 2026."
-                )
-            else:
-                bullet_points = "; ".join([f"'{a['title']}' ({a['source']})" for a in articles[:3]])
-                llm_analysis = (
-                    f"### 1. Macro Sentiment & Media Narrative\n"
-                    f"Recent media flow around {company_name} reflects active commercial attention and sustained institutional engagement. "
-                    f"Market narrative is predominantly constructive around core domain execution.\n\n"
-                    f"### 2. Key Catalysts, Commercial Deals & Operational Milestones\n"
-                    f"Significant recent coverage highlights key corporate and partner milestones: {bullet_points}.\n\n"
-                    f"### 3. Strategic Risks & Competitive Pressures\n"
-                    f"As industry competition accelerates, key observation points focus on client contract renewals, "
-                    f"execution agility, and broader macroeconomic technology budget trends."
-                )
+        if "Report]" in llm_analysis or len(llm_analysis.strip()) < 100:
+            sec1_text = (
+                f"Recent media flow around {company_name} reflects active commercial attention and sustained institutional engagement. "
+                f"Market narrative is predominantly constructive around core domain execution and technological scaling."
+            )
+            
+            bullet_points = "; ".join([f"'{a['title']}' ({a['source']})" for a in articles[:3]])
+            sec2_text = f"Significant recent coverage highlights key corporate and partner milestones: {bullet_points}."
+            if gov_events:
+                sec2_text += f"\n\nIn corporate governance, key executive updates include: {'; '.join(gov_events)}."
+
+            sec3_text = (
+                f"As industry competition accelerates, primary risk factors center on enterprise budget cycles, "
+                f"execution agility, and broader macroeconomic technology trends."
+            )
+            if reg_risks:
+                sec3_text += f"\n\nFrom a regulatory perspective, market observers are monitoring: {'; '.join(reg_risks)}."
+
+            llm_analysis = (
+                f"### 1. Macro Sentiment & Media Narrative\n{sec1_text}\n\n"
+                f"### 2. Key Catalysts, Commercial Deals & Operational Milestones\n{sec2_text}\n\n"
+                f"### 3. Strategic Risks & Competitive Pressures\n{sec3_text}"
+            )
 
         return {
             "status": "success",
             "articles": articles,
-            "analysis": llm_analysis
+            "analysis": llm_analysis,
+            "detected_events": detected_events
         }

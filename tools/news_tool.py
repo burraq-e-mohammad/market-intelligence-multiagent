@@ -4,6 +4,36 @@ import yfinance as yf
 from typing import List, Dict, Any
 import re
 
+def classify_breaking_events(articles: List[Dict[str, str]]) -> Dict[str, List[str]]:
+    """
+    Dynamically analyzes news headlines and snippets for high-priority corporate catalysts across ANY company:
+    1. Governance & Leadership transitions (resignations, appointments, interim leaders, board changes)
+    2. Regulatory, legal & antitrust actions (DOJ, SEC, export controls, sanctions, subpoenas, investigations)
+    3. Commercial, technological & M&A milestones
+    """
+    governance = []
+    regulatory = []
+    commercial = []
+    
+    gov_pattern = re.compile(r'\b(resigns?|stepping down|stepped down|appointed|names?|named|replaces?|interim ceo|new ceo|board chair|chairman|succession|exits?|ousted)\b', re.IGNORECASE)
+    reg_pattern = re.compile(r'\b(investigation|probe|inquiry|sec|doj|export control|sanctions|subpoena|antitrust|lawsuit|penalty|fine|oversight committee|compliance|scrutiny)\b', re.IGNORECASE)
+    comm_pattern = re.compile(r'\b(launches|unveils|next-gen|record revenue|earnings beat|acquisition|partnership|deal|contracts?|breakthrough)\b', re.IGNORECASE)
+
+    for a in articles:
+        text = f"{a.get('title', '')} {a.get('snippet', '')}"
+        if gov_pattern.search(text):
+            governance.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")
+        if reg_pattern.search(text):
+            regulatory.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")
+        if comm_pattern.search(text):
+            commercial.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")
+
+    return {
+        "governance_events": governance[:3],
+        "regulatory_risks": regulatory[:3],
+        "commercial_milestones": commercial[:3]
+    }
+
 def get_company_news(company_name: str, symbol: str = "", max_results: int = 5) -> Dict[str, Any]:
     """
     Fetch verified breaking news for the exact target company.
@@ -90,11 +120,14 @@ def get_company_news(company_name: str, symbol: str = "", max_results: int = 5) 
         except Exception:
             pass
 
+    detected_events = classify_breaking_events(articles)
+
     return {
         "status": "success" if articles else "empty",
         "company": company_name,
         "count": len(articles),
-        "articles": articles
+        "articles": articles,
+        "detected_events": detected_events
     }
 
 if __name__ == "__main__":

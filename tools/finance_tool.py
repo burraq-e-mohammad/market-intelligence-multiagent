@@ -46,7 +46,36 @@ def format_number(val: Optional[float], prefix: str = "$", currency: str = "USD"
     else:
         return f"{curr_prefix}{val:.2f}"
 
-KNOWN_PUBLIC_PROFILES = {
+def get_revenue_scale_descriptor(val: Optional[float]) -> str:
+    """Dynamically categorizes corporate revenue scale to prevent double/triple-digit wording hallucinations."""
+    if val is None or not isinstance(val, (int, float)):
+        return "commercial revenue scale"
+    abs_v = abs(val)
+    if abs_v >= 1e12:
+        return "trillion-dollar scale"
+    elif abs_v >= 1e11:
+        return "triple-digit billion-dollar scale"
+    elif abs_v >= 1e10:
+        return "tens-of-billions dollar scale"
+    elif abs_v >= 1e9:
+        return "multi-billion-dollar scale"
+    elif abs_v >= 1e6:
+        return "multi-million-dollar scale"
+    return "commercial revenue scale"
+
+def get_peg_rationale(peg: Optional[float], fwd_pe: Optional[float]) -> str:
+    """
+    Mathematically verified PEG ratio formulation: Forward P/E / Consensus EPS Compound Growth.
+    Eliminates model confusion between revenue growth and earnings growth across any equity.
+    """
+    if peg is not None and fwd_pe is not None and peg > 0:
+        implied_growth = round(fwd_pe / peg, 1)
+        return f"PEG ratio of {peg:.2f} reflects Forward P/E ({fwd_pe:.2f}x) relative to consensus long-term EPS compound growth of ~{implied_growth}% (not revenue growth)."
+    elif peg is not None:
+        return f"PEG ratio of {peg:.2f} reflects multiple valuation against Wall Street consensus multi-year EPS growth."
+    return "PEG ratio reflects Forward P/E relative to consensus long-term earnings growth."
+
+OFFLINE_DEMO_PROFILES = {
     "NVDA": {
         "symbol": "NVDA",
         "company_name": "NVIDIA Corporation",
@@ -65,6 +94,8 @@ KNOWN_PUBLIC_PROFILES = {
         "52_week_high": "155.00 USD",
         "52_week_low": "47.50 USD",
         "total_revenue": "$302.97B",
+        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
+        "peg_rationale": "PEG ratio of 0.20 reflects Forward P/E (9.77x) relative to consensus long-term EPS compound growth of ~48.9% (not revenue growth).",
         "gross_margins": "75.12%",
         "operating_margins": "62.05%",
         "profit_margins": "55.60%",
@@ -90,6 +121,8 @@ KNOWN_PUBLIC_PROFILES = {
         "52_week_high": "237.23 USD",
         "52_week_low": "164.08 USD",
         "total_revenue": "$391.04B",
+        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
+        "peg_rationale": "PEG ratio of 2.40 reflects Forward P/E (28.50x) relative to consensus long-term EPS growth.",
         "gross_margins": "46.21%",
         "operating_margins": "31.25%",
         "profit_margins": "24.00%",
@@ -115,6 +148,8 @@ KNOWN_PUBLIC_PROFILES = {
         "52_week_high": "468.35 USD",
         "52_week_low": "366.50 USD",
         "total_revenue": "$245.12B",
+        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
+        "peg_rationale": "PEG ratio of 2.10 reflects Forward P/E (30.10x) relative to consensus long-term EPS growth.",
         "gross_margins": "69.80%",
         "operating_margins": "44.60%",
         "profit_margins": "36.20%",
@@ -140,6 +175,8 @@ KNOWN_PUBLIC_PROFILES = {
         "52_week_high": "360.00 USD",
         "52_week_low": "138.80 USD",
         "total_revenue": "$97.15B",
+        "revenue_scale_descriptor": "tens-of-billions dollar scale",
+        "peg_rationale": "PEG ratio of 3.80 reflects high-multiple growth pricing against projected auto and energy EPS growth.",
         "gross_margins": "18.20%",
         "operating_margins": "8.20%",
         "profit_margins": "7.10%",
@@ -165,6 +202,8 @@ KNOWN_PUBLIC_PROFILES = {
         "52_week_high": "215.90 USD",
         "52_week_low": "144.05 USD",
         "total_revenue": "$620.13B",
+        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
+        "peg_rationale": "PEG ratio of 1.35 reflects Forward P/E (32.80x) against AWS and advertising EPS compound growth.",
         "gross_margins": "48.50%",
         "operating_margins": "9.80%",
         "profit_margins": "7.80%",
@@ -190,6 +229,8 @@ KNOWN_PUBLIC_PROFILES = {
         "52_week_high": "485.00 PKR",
         "52_week_low": "310.00 PKR",
         "total_revenue": "PKR 54.30B",
+        "revenue_scale_descriptor": "tens-of-billions PKR scale",
+        "peg_rationale": "PEG ratio of 0.85 reflects attractive multiple relative to >25% historical earnings growth.",
         "gross_margins": "31.50%",
         "operating_margins": "21.80%",
         "profit_margins": "18.20%",
@@ -315,6 +356,8 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                         "52_week_high": f"{fifty_two_week_high:.2f} {currency}" if fifty_two_week_high else "N/A",
                         "52_week_low": f"{fifty_two_week_low:.2f} {currency}" if fifty_two_week_low else "N/A",
                         "total_revenue": format_number(total_revenue, currency=currency),
+                        "revenue_scale_descriptor": get_revenue_scale_descriptor(total_revenue),
+                        "peg_rationale": get_peg_rationale(peg_ratio, forward_pe),
                         "gross_margins": gross_pct,
                         "operating_margins": op_pct,
                         "profit_margins": margin_pct,
@@ -327,11 +370,11 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             pass
 
         # If live API failed (e.g. 403 / network timeout), fallback to verified public profile
-        if resolved_ticker in KNOWN_PUBLIC_PROFILES:
+        if resolved_ticker in OFFLINE_DEMO_PROFILES:
             return {
                 "status": "success",
                 "is_public": True,
-                "data": KNOWN_PUBLIC_PROFILES[resolved_ticker]
+                "data": OFFLINE_DEMO_PROFILES[resolved_ticker]
             }
 
     # If unlisted / private or no exact public stock found
@@ -374,8 +417,8 @@ def generate_deterministic_financial_table(data: Dict[str, Any]) -> str:
 | **Market Capitalization** | {data.get('market_cap', 'N/A')} | Diluted Shares x Current Price | Verified Market Cap |
 | **Trailing P/E Ratio** | {data.get('trailing_pe', data.get('pe_ratio', 'N/A'))} | TTM GAAP Diluted EPS | Deterministic Multiple |
 | **Forward P/E Ratio** | {data.get('forward_pe', 'N/A')} | Wall Street Consensus Forward EPS | Deterministic Multiple |
-| **PEG Ratio** | {data.get('peg_ratio', 'N/A')} | Forward P/E / Consensus EPS Growth (~49%) | Deterministic PEG |
-| **TTM Revenue Volume** | {data.get('total_revenue', 'N/A')} | Trailing 12 Months GAAP (Triple-Digit Billion Scale) | Verified SEC TTM |
+| **PEG Ratio** | {data.get('peg_ratio', 'N/A')} | Forward P/E / Consensus EPS Growth | Deterministic Multiple |
+| **TTM Revenue Volume** | {data.get('total_revenue', 'N/A')} | Trailing 12 Months GAAP ({data.get('revenue_scale_descriptor', 'Verified Scale')}) | Verified SEC TTM |
 | **Gross Margin** | {data.get('gross_margins', 'N/A')} | GAAP Gross Profit / Revenue | Deterministic |
 | **Operating Margin** | {data.get('operating_margins', 'N/A')} | Operating Income / Revenue | Deterministic |
 | **Net Profit Margin** | {data.get('profit_margins', 'N/A')} | Net Income / Revenue | Deterministic |

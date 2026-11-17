@@ -28,7 +28,8 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
     text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
     text = re.sub(r'\bcanonical\b', 'verified', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bdouble-digit\s+scale\b(?=.*\$30[0-9])', 'triple-digit billion scale', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bdouble-digit\s+scale\b(?=.*\$[1-9][0-9]{2}(?:\.[0-9]+)?B)', 'triple-digit billion-dollar scale', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bdouble-digit\s+scale\s*(?:of|at)?\s*\$([1-9][0-9]{2})', r'triple-digit billion-dollar scale of $\1', text, flags=re.IGNORECASE)
     
     # 2. Comprehensive Unicode Dash & Hyphen mapping (prevents '?' in date ranges e.g. 1999-2006, Nov 16-17)
     dash_chars = [
@@ -164,10 +165,17 @@ def generate_pdf_report(
     Generate an in-depth, structured executive PDF report.
     Returns bytes in-memory without creating files on disk unless output_path is explicitly provided.
     """
-    company = sanitize_text(report_data.get("company_name", "Target Company"))
-    ticker = sanitize_text(report_data.get("ticker", "PRIVATE / UNLISTED"))
-    metrics = report_data.get("metrics", {})
-    is_public = report_data.get("is_public", True)
+    company = sanitize_text(report_data.get("company_name", report_data.get("shared_state", {}).get("company_name", "Target Company")))
+    ticker = sanitize_text(report_data.get("ticker", report_data.get("shared_state", {}).get("ticker", "PRIVATE / UNLISTED")))
+    metrics = report_data.get("metrics", report_data.get("shared_state", {}).get("metrics", {}))
+    is_public = report_data.get("is_public", report_data.get("shared_state", {}).get("is_public", True))
+    
+    exec_summary = report_data.get("executive_summary") or report_data.get("synthesis", {}).get("executive_summary", "No executive summary provided.")
+    corp_bg = report_data.get("corporate_background") or report_data.get("biography", {}).get("analysis", "No background available.")
+    fin_analysis = report_data.get("financial_analysis") or report_data.get("financial", {}).get("analysis", "")
+    news_analysis = report_data.get("recent_news_analysis") or report_data.get("news", {}).get("analysis", "No recent news analysis provided.")
+    strategic_out = report_data.get("strategic_outlook") or report_data.get("synthesis", {}).get("strategic_outlook", "No outlook details provided.")
+    news_articles = report_data.get("news_articles") or report_data.get("news", {}).get("articles", [])
     
     pdf = IntelligenceReportPDF(company_name=company, ticker=ticker)
     pdf.add_page()
@@ -222,25 +230,24 @@ def generate_pdf_report(
     
     # Executive Summary Section
     pdf.section_title("2. Executive Summary & Strategic Synthesis")
-    pdf.body_paragraph(report_data.get("executive_summary", "No executive summary provided."))
+    pdf.body_paragraph(exec_summary)
     
     # Background & Corporate History
     pdf.section_title("3. Corporate Background, Operations & Strategic Moat")
-    pdf.body_paragraph(report_data.get("corporate_background", "No background available."))
+    pdf.body_paragraph(corp_bg)
     
     # Financial Analysis Narrative
-    if report_data.get("financial_analysis"):
+    if fin_analysis:
         pdf.section_title("4. In-Depth Financial & Valuation Analysis")
-        pdf.body_paragraph(report_data.get("financial_analysis"))
+        pdf.body_paragraph(fin_analysis)
 
     # Recent News & Catalysts
     pdf.section_title("5. Recent News, Strategic Moves & Market Sentiment")
-    news_text = report_data.get("recent_news_analysis", "No recent news analysis provided.")
-    pdf.body_paragraph(news_text)
+    pdf.body_paragraph(news_analysis)
 
     # Detailed Sources Section (Requested by user)
     pdf.section_title("Here are the Detailed Sources:")
-    articles: List[Dict[str, str]] = report_data.get("news_articles", [])
+    articles: List[Dict[str, str]] = news_articles
     if articles:
         pdf.set_font("Helvetica", "", 8.5)
         for i, a in enumerate(articles, 1):
@@ -261,7 +268,7 @@ def generate_pdf_report(
     
     # Strategic Outlook & Risks
     pdf.section_title("6. Strategic Outlook, Growth Vectors & Key Risks")
-    pdf.body_paragraph(report_data.get("strategic_outlook", "No outlook details provided."))
+    pdf.body_paragraph(strategic_out)
     
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
