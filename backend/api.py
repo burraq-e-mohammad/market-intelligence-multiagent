@@ -35,9 +35,9 @@ class ResearchResponse(BaseModel):
     target: str
     is_public: bool
     dossier: Dict[str, Any]
-    pdf_filename: str
-    md_filename: str
     execution_time: Optional[float] = None
+    pdf_filename: Optional[str] = None
+    md_filename: Optional[str] = None
 
 @app.get("/")
 def root():
@@ -63,7 +63,7 @@ def conduct_research(request: ResearchRequest):
     """
     Main Multi-Agent Orchestration Endpoint.
     Parent Agent delegates to Financial, News, and Biographer subagents,
-    synthesizes intelligence, and generates reports.
+    synthesizes intelligence, and generates in-memory reports (0 disk files written).
     """
     target = request.target.strip()
     if not target:
@@ -72,19 +72,12 @@ def conduct_research(request: ResearchRequest):
     try:
         results = supervisor.run_investigation(target)
         dossier = results["dossier"]
-        pdf_path = results["pdf_path"]
-        md_path = results["md_path"]
-        
-        pdf_filename = os.path.basename(pdf_path)
-        md_filename = os.path.basename(md_path)
         
         return {
             "status": "success",
             "target": target,
             "is_public": dossier.get("is_public", False),
             "dossier": dossier,
-            "pdf_filename": pdf_filename,
-            "md_filename": md_filename,
             "execution_time": results.get("execution_time")
         }
     except Exception as e:
@@ -128,17 +121,22 @@ def conduct_research_stream(request: ResearchRequest):
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
-@app.get("/api/reports/{filename}")
-def download_report(filename: str):
+@app.get("/api/pdf")
+def download_pdf(target: str):
     """
-    Serve generated PDF and Markdown dossiers directly to clients.
+    Serve generated PDF dossier directly in-memory without saving any files to disk.
     """
-    file_path = os.path.join("reports", filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Requested report file was not found.")
-        
-    media_type = "application/pdf" if filename.endswith(".pdf") else "text/markdown"
-    return FileResponse(file_path, media_type=media_type, filename=filename)
+    clean = target.strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="Target company name or ticker required.")
+    results = supervisor.run_investigation(clean)
+    pdf_bytes = results.get("pdf_bytes")
+    from fastapi.responses import Response
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={clean}_dossier.pdf"}
+    )
 
 if __name__ == "__main__":
     import uvicorn

@@ -247,24 +247,16 @@ STRATEGIC_OUTLOOK:
         emit("QA Critic Agent", "Quality Assurance & Fact-Checking", "verifying", "Auditing dossier for Single Source of Truth consistency, tabular verification, and typography sanitization...")
         final_dossier = self.qa_critic.review_and_sanitize(final_dossier, shared_state)
 
-        # Generate Reports
-        emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade PDF dossier and Markdown intelligence files...")
-        clean_name = re.sub(r'[^a-zA-Z0-9]', '_', clean_target).lower()
-        pdf_path = f"reports/{clean_name}_intelligence_dossier.pdf"
-        md_path = f"reports/{clean_name}_intelligence_dossier.md"
-        
-        generate_pdf_report(final_dossier, pdf_path)
-        self._write_markdown_report(final_dossier, md_path)
+        # Generate In-Memory Report (No disk files created)
+        emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade in-memory PDF dossier...")
+        pdf_bytes = generate_pdf_report(final_dossier)
         
         emit("Research Supervisor", "Parent Director", "complete", f"Investigation completed successfully in {elapsed_time}s! All dossiers verified.")
-        print(f"\n[Parent Agent: {self.name}] Investigation completed in {elapsed_time}s!")
-        print(f"  -> PDF Report: {pdf_path}")
-        print(f"  -> Markdown Report: {md_path}")
+        print(f"\n[Parent Agent: {self.name}] Investigation completed in {elapsed_time}s! (In-memory, 0 disk files created)")
         
         return {
             "dossier": final_dossier,
-            "pdf_path": pdf_path,
-            "md_path": md_path,
+            "pdf_bytes": pdf_bytes,
             "execution_time": elapsed_time
         }
 

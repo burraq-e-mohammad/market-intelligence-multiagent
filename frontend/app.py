@@ -172,7 +172,7 @@ if execute_btn or preset:
                                 elif item.get("type") == "done":
                                     results = item.get("results", {})
                                     dossier = results.get("dossier")
-                                    pdf_path = results.get("pdf_path")
+                                    pdf_bytes = results.get("pdf_bytes")
                                     execution_time = results.get("execution_time")
                                 elif item.get("type") == "error":
                                     status.write(f"⚠️ Worker notice: {item.get('error')}")
@@ -185,6 +185,7 @@ if execute_btn or preset:
             import tools.wiki_tool
             import tools.news_tool
             import tools.finance_tool
+            import tools.pdf_tool
             import agents.biography_agent
             import agents.financial_agent
             import agents.news_agent
@@ -194,6 +195,7 @@ if execute_btn or preset:
             importlib.reload(tools.wiki_tool)
             importlib.reload(tools.news_tool)
             importlib.reload(tools.finance_tool)
+            importlib.reload(tools.pdf_tool)
             importlib.reload(agents.biography_agent)
             importlib.reload(agents.financial_agent)
             importlib.reload(agents.news_agent)
@@ -215,7 +217,7 @@ if execute_btn or preset:
                 results = supervisor.run_investigation(query_target)
 
             dossier = results.get("dossier")
-            pdf_path = results.get("pdf_path")
+            pdf_bytes = results.get("pdf_bytes")
             execution_time = results.get("execution_time")
 
         time_display = f"{execution_time:.1f}s" if execution_time else "Done"
@@ -241,14 +243,18 @@ if execute_btn or preset:
                 st.caption(f"Status: **Unlisted (No Public Stock Ticker)** | Reporting: **Exempt from SEC 10-K Filings**")
         
         with header_col2:
-            # Download PDF Button
-            if pdf_path and os.path.exists(pdf_path):
-                with open(pdf_path, "rb") as f:
-                    pdf_bytes = f.read()
+            # Download PDF Button (In-memory, 0 disk files)
+            if not pdf_bytes and dossier:
+                from tools.pdf_tool import generate_pdf_report
+                pdf_bytes = generate_pdf_report(dossier)
+                
+            if pdf_bytes:
+                import re
+                clean_fname = re.sub(r'[^a-zA-Z0-9]', '_', query_target).lower()
                 st.download_button(
                     label="📥 Download Executive PDF Dossier",
                     data=pdf_bytes,
-                    file_name=os.path.basename(pdf_path),
+                    file_name=f"{clean_fname}_intelligence_dossier.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )

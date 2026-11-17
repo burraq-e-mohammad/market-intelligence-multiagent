@@ -23,7 +23,7 @@ def print_banner():
 
     console.print(Panel(banner_text, border_style="cyan", title="Multi-Agent AI", title_align="left"))
 
-def display_summary(dossier: dict, pdf_path: str, md_path: str):
+def display_summary(dossier: dict, execution_time: float = 0.0):
     metrics = dossier.get("metrics", {})
     is_public = dossier.get("is_public", True)
     
@@ -63,11 +63,11 @@ def display_summary(dossier: dict, pdf_path: str, md_path: str):
     
     # Reports Card
     report_info = (
-        f"[bold white]PDF Report:[/bold white] [underline cyan]{pdf_path}[/underline cyan]\n"
-        f"[bold white]Markdown Report:[/bold white] [underline cyan]{md_path}[/underline cyan]"
+        f"[bold green]✔ In-Memory Intelligence Dossier Synthesized Successfully![/bold green]\n"
+        f"[dim]Execution Time: {execution_time}s | Storage Footprint: 0 files written to disk (Clean In-Memory Mode)[/dim]"
     )
     console.print("\n")
-    console.print(Panel(report_info, title="[bold yellow]Exported Dossiers[/bold yellow]", border_style="yellow"))
+    console.print(Panel(report_info, title="[bold yellow]Dossier Status[/bold yellow]", border_style="yellow"))
 
 def main():
     print_banner()
@@ -91,7 +91,8 @@ def main():
     supervisor = ResearchSupervisor()
     results = supervisor.run_investigation(target)
     
-    display_summary(results["dossier"], results["pdf_path"], results["md_path"])
+    display_summary(results["dossier"], results.get("execution_time", 0.0))
+    console.print("\n[bold green]Done! Multi-agent pipeline executed successfully.[/bold green]\n")
     console.print("\n[bold green]Done! Multi-agent pipeline executed successfully.[/bold green]\n")
 
 if __name__ == "__main__":

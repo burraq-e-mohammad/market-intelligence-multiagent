@@ -150,13 +150,12 @@ class IntelligenceReportPDF(FPDF):
 
 def generate_pdf_report(
     report_data: Dict[str, Any],
-    output_path: str = "reports/intelligence_report.pdf"
-) -> str:
+    output_path: Optional[str] = None
+) -> bytes:
     """
     Generate an in-depth, structured executive PDF report.
+    Returns bytes in-memory without creating files on disk unless output_path is explicitly provided.
     """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
     company = sanitize_text(report_data.get("company_name", "Target Company"))
     ticker = sanitize_text(report_data.get("ticker", "PRIVATE / UNLISTED"))
     metrics = report_data.get("metrics", {})
@@ -256,5 +255,8 @@ def generate_pdf_report(
     pdf.section_title("6. Strategic Outlook, Growth Vectors & Key Risks")
     pdf.body_paragraph(report_data.get("strategic_outlook", "No outlook details provided."))
     
-    pdf.output(output_path)
-    return output_path
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        pdf.output(output_path)
+    
+    return bytes(pdf.output())
