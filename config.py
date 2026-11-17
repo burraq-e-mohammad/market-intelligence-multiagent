@@ -26,7 +26,7 @@ def get_config():
     return {
         "PROVIDER": active_provider,
         "GEMINI_API_KEY": gemini_key,
-        "GEMINI_MODEL": os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        "GEMINI_MODEL": os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
         "GROQ_API_KEY": groq_key,
         "GROQ_MODEL": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
         "OLLAMA_BASE_URL": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),

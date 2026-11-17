@@ -4,12 +4,13 @@ from agents.news_agent import NewsScoutAgent
 from agents.biography_agent import BiographyAgent
 from tools.pdf_tool import generate_pdf_report
 from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor
 import re
 
 class ResearchSupervisor(BaseAgent):
     """
     Parent Agent (Supervisor / Orchestrator):
-    Coordinates subagents, decomposes tasks, aggregates findings, and synthesizes final reports.
+    Coordinates subagents in parallel, decomposes tasks, aggregates findings, and synthesizes final reports.
     Delivers deep, comprehensive, and highly structured dossiers.
     """
     def __init__(self):
@@ -29,18 +30,25 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
     def run_investigation(self, target_input: str) -> Dict[str, Any]:
         """
         Executes the full hierarchical multi-agent workflow:
-        1. Subagent 1 (Financial Analyst) identifies Public vs. Private entity status & metrics.
-        2. Subagent 2 (News Scout) gathers breaking headlines & sentiment.
-        3. Subagent 3 (Corporate Biographer) retrieves history, founders, and business model.
-        4. Parent Agent synthesizes data into deep Executive Briefing & Strategic Outlook.
-        5. Compiles Markdown and PDF reports with detailed verified sources.
+        1. Subagents run concurrently in parallel via ThreadPoolExecutor.
+        2. Parent Agent synthesizes data into deep Executive Briefing & Strategic Outlook.
+        3. Compiles Markdown and PDF reports with detailed verified sources.
         """
         clean_target = target_input.strip()
         print(f"\n[Parent Agent: {self.name}] Initiating research project for '{clean_target}'...")
         
-        # Step 1: Financial & Entity Type Resolution
-        print(f"\n---> [Delegating Task 1] Calling {self.financial_agent.name} (Checking Public vs. Private Status)...")
-        fin_data = self.financial_agent.analyze(clean_target)
+        # Parallel Execution of Subagents
+        print(f"---> [Concurrent Subagent Execution] Calling Financial Analyst, News Scout, and Corporate Biographer in parallel...")
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            f_fin = executor.submit(self.financial_agent.analyze, clean_target)
+            f_news = executor.submit(self.news_agent.analyze, clean_target)
+            f_bio = executor.submit(self.biography_agent.analyze, clean_target)
+            
+            fin_data = f_fin.result()
+            news_data = f_news.result()
+            bio_data = f_bio.result()
+
         is_public = fin_data.get("is_public", False)
         metrics = fin_data.get("metrics", {})
         
@@ -52,15 +60,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         else:
             print(f"[Parent Agent] Classified as PRIVATE ENTERPRISE -> Status: Unlisted (No public stock ticker)")
 
-        # Step 2: News Scout
-        print(f"---> [Delegating Task 2] Calling {self.news_agent.name} (Tool: Real-Time News Feeds)...")
-        news_data = self.news_agent.analyze(company_name, symbol=ticker)
-        
-        # Step 3: Corporate Biographer
-        print(f"---> [Delegating Task 3] Calling {self.biography_agent.name} (Tool: Wikipedia & Web Profile)...")
-        bio_data = self.biography_agent.analyze(company_name)
-
-        # Step 4: Parent Synthesis
+        # Step 2: Parent Synthesis
         print(f"\n[Parent Agent: {self.name}] Synthesizing multi-agent intelligence streams...")
         
         synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Public Entity: {is_public}).
@@ -143,7 +143,7 @@ STRATEGIC_OUTLOOK:
                     f"Primary risk considerations include private capital market liquidity conditions, competition from well-funded incumbents, and client concentration risks characteristic of privately held technology firms."
                 )
 
-        # Step 5: Final Compilation & Export
+        # Step 3: Final Compilation & Export
         final_dossier = {
             "company_name": company_name,
             "ticker": ticker,

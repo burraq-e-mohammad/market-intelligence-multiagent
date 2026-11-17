@@ -142,7 +142,7 @@ if execute_btn or preset:
                 response = requests.post(
                     f"{API_BASE_URL}/api/research",
                     json={"target": target_input},
-                    timeout=90
+                    timeout=300
                 )
                 if response.status_code == 200:
                     payload = response.json()
