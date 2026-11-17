@@ -170,12 +170,49 @@ def fetch_verified_media_profile(company_name: str) -> Dict[str, Any]:
         "detailed_content": detailed_body
     }
 
+def is_corporate_wikipedia_page(page) -> bool:
+    """
+    Ensure the Wikipedia page actually represents a corporation, business, or enterprise,
+    and not an album, song, band, film, book, person, biological species, or geographic location.
+    """
+    if not page or not page.exists():
+        return False
+
+    summary_lower = page.summary.lower()
+    first_sentence = summary_lower.split(".")[0]
+
+    # Reject non-corporate entities based on explicit opening phrases
+    non_corporate_phrases = [
+        "is an album", "is a compilation album", "is the debut album", "is a studio album",
+        "is a song", "is the lead single", "is a single by", "is a track",
+        "is an american band", "is a rock band", "is an english band", "is a heavy metal band",
+        "is a film", "is a movie", "is a television series", "is a tv series",
+        "was an american inventor", "was an inventor", "is an author", "is a politician",
+        "is a footballer", "is a cricketer", "is a species of", "is a genus of",
+        "is a village", "is a town", "is a river", "is an island", "is a mountain"
+    ]
+    if any(phrase in first_sentence for phrase in non_corporate_phrases):
+        return False
+
+    # Positive confirmation: Must contain corporate/business attributes in summary
+    corporate_terms = [
+        "company", "corporation", "incorporated", "enterprise", "business", "founded",
+        "headquartered", "headquarters", "subsidiary", "telecom", "software",
+        "provider", "manufacturer", "firm", "platform", "conglomerate", "multinational",
+        "retailer", "financial services", "commercial"
+    ]
+    if not any(term in summary_lower for term in corporate_terms):
+        return False
+
+    return True
+
 def get_company_biography(company_name: str) -> Dict[str, Any]:
     """
     Fetch comprehensive, deep corporate history, founding milestones, subsidiaries, and business model.
     1. First uses Wikipedia OpenSearch API to resolve exact canonical article title with strict validation.
-    2. Recursively extracts all sub-sections (History, Founding, Products, Operations).
-    3. If company is unlisted on Wikipedia (e.g. 10Pearls), performs verified commercial press disclosures search.
+    2. Verifies that the article is genuinely a corporate/business page (not an album, band, or person).
+    3. Recursively extracts all sub-sections (History, Founding, Products, Operations).
+    4. If company is unlisted on Wikipedia (e.g. 10Pearls, JazzWorld), performs verified commercial press disclosures search.
     """
     user_agent = "MarketIntelAgent/2.0 (https://github.com/multi-agent-project; contact@example.com)"
     wiki = wikipediaapi.Wikipedia(user_agent=user_agent, language="en")
@@ -200,14 +237,14 @@ def get_company_biography(company_name: str) -> Dict[str, Any]:
         try:
             p = wiki.page(candidate)
             if p.exists() and len(p.summary) > 60:
-                # Disambiguation check & final title validation
-                if "may refer to:" not in p.summary and is_valid_wiki_match(company_name, p.title):
+                # Disambiguation check, final title validation & corporate content check
+                if "may refer to:" not in p.summary and is_valid_wiki_match(company_name, p.title) and is_corporate_wikipedia_page(p):
                     page = p
                     break
         except Exception:
             pass
             
-    # If valid Wikipedia page found
+    # If valid Wikipedia corporate page found
     if page and page.exists():
         summary = page.summary.strip()
         detailed_body = extract_nested_sections(page.sections)
@@ -222,7 +259,7 @@ def get_company_biography(company_name: str) -> Dict[str, Any]:
             "detailed_content": full_dossier_text
         }
 
-    # Fallback for emerging or private enterprises not yet on Wikipedia (e.g., 10Pearls, Emumba)
+    # Fallback for emerging or private enterprises not yet on Wikipedia (e.g., 10Pearls, JazzWorld, Emumba)
     return fetch_verified_media_profile(company_name)
 
 if __name__ == "__main__":

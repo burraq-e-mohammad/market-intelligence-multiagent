@@ -181,8 +181,22 @@ if execute_btn or preset:
         # 2. Fallback: Direct Agent Execution with live callback
         if not dossier:
             import importlib
+            import tools.wiki_tool
+            import tools.news_tool
+            import tools.finance_tool
+            import agents.biography_agent
+            import agents.financial_agent
+            import agents.news_agent
             import agents.supervisor
+
+            importlib.reload(tools.wiki_tool)
+            importlib.reload(tools.news_tool)
+            importlib.reload(tools.finance_tool)
+            importlib.reload(agents.biography_agent)
+            importlib.reload(agents.financial_agent)
+            importlib.reload(agents.news_agent)
             importlib.reload(agents.supervisor)
+
             from agents.supervisor import ResearchSupervisor
             supervisor = ResearchSupervisor()
 
