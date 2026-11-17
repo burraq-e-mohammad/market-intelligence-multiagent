@@ -6,7 +6,7 @@ import os
 
 def run_backend():
     print("🚀 Starting FastAPI Backend at http://127.0.0.1:8000...")
-    return subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.api:app", "--host", "127.0.0.1", "--port", "8000"])
+    return subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.api:app", "--host", "127.0.0.1", "--port", "8000", "--reload"])
 
 def run_frontend():
     print("🌐 Starting Streamlit Dashboard at http://localhost:8501...")

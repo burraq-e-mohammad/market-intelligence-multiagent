@@ -151,7 +151,6 @@ if execute_btn or preset:
 
         # 1. Attempt Streaming Call to FastAPI Backend
         if backend_online:
-            status.write("🌐 Connecting to FastAPI Backend (`POST /api/research/stream`)...")
             try:
                 with requests.post(
                     f"{API_BASE_URL}/api/research/stream",
@@ -175,15 +174,12 @@ if execute_btn or preset:
                                     pdf_path = results.get("pdf_path")
                                     execution_time = results.get("execution_time")
                                 elif item.get("type") == "error":
-                                    status.write(f"⚠️ Backend worker warning: {item.get('error')}")
-                    else:
-                        status.write(f"⚠️ Backend status {response.status_code}. Shifting to direct agent mode...")
-            except Exception as e:
-                status.write(f"⚠️ Backend connection unavailable ({e}). Shifting to direct agent mode...")
+                                    status.write(f"⚠️ Worker notice: {item.get('error')}")
+            except Exception:
+                pass
 
         # 2. Fallback: Direct Agent Execution with live callback
         if not dossier:
-            status.write("⚡ Initializing Multi-Agent supervisor in Direct Mode...")
             import importlib
             import agents.supervisor
             importlib.reload(agents.supervisor)
