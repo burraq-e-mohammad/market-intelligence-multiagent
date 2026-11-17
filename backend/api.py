@@ -1,9 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import os
+import json
+import queue
+import threading
 from agents.supervisor import ResearchSupervisor
 import config
 
@@ -34,6 +37,7 @@ class ResearchResponse(BaseModel):
     dossier: Dict[str, Any]
     pdf_filename: str
     md_filename: str
+    execution_time: Optional[float] = None
 
 @app.get("/")
 def root():
@@ -80,10 +84,49 @@ def conduct_research(request: ResearchRequest):
             "is_public": dossier.get("is_public", False),
             "dossier": dossier,
             "pdf_filename": pdf_filename,
-            "md_filename": md_filename
+            "md_filename": md_filename,
+            "execution_time": results.get("execution_time")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Multi-Agent investigation failed: {str(e)}")
+
+@app.post("/api/research/stream")
+def conduct_research_stream(request: ResearchRequest):
+    """
+    Streaming endpoint providing real-time multi-agent progression events and final intelligence dossier.
+    """
+    target = request.target.strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Target company name or ticker is required.")
+
+    def event_stream():
+        event_queue = queue.Queue()
+
+        def on_progress(event):
+            event_queue.put({"type": "progress", "event": event})
+
+        def run_worker():
+            try:
+                try:
+                    results = supervisor.run_investigation(target, progress_callback=on_progress)
+                except TypeError:
+                    results = supervisor.run_investigation(target)
+                event_queue.put({"type": "done", "results": results})
+            except Exception as exc:
+                event_queue.put({"type": "error", "error": str(exc)})
+            finally:
+                event_queue.put(None)
+
+        worker_thread = threading.Thread(target=run_worker)
+        worker_thread.start()
+
+        while True:
+            item = event_queue.get()
+            if item is None:
+                break
+            yield json.dumps(item) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 @app.get("/api/reports/{filename}")
 def download_report(filename: str):

@@ -48,6 +48,16 @@ st.markdown("""
         font-size: 0.85rem;
         font-weight: 600;
     }
+    .badge-time {
+        background-color: #ECFDF5;
+        color: #065F46;
+        border: 1px solid #10B981;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        margin-left: 8px;
+    }
     .news-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -107,13 +117,13 @@ with st.sidebar:
     preset = None
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Systems Limited", use_container_width=True): preset = "Systems Limited"
+        if st.button("Microsoft", use_container_width=True): preset = "Microsoft"
         if st.button("NVIDIA", use_container_width=True): preset = "NVDA"
         if st.button("Apple", use_container_width=True): preset = "AAPL"
     with col2:
         if st.button("OpenAI", use_container_width=True): preset = "OpenAI"
         if st.button("Tesla", use_container_width=True): preset = "TSLA"
-        if st.button("Emumba", use_container_width=True): preset = "Emumba"
+        if st.button("Amazon", use_container_width=True): preset = "Amazon"
 
 # Header
 st.markdown('<div class="main-header">Autonomous Market & Company Intelligence</div>', unsafe_allow_html=True)
@@ -122,65 +132,99 @@ st.markdown('<div class="sub-header">In-Depth Multi-Agent Intelligence Dossier w
 # Search Input
 target_input = st.text_input(
     "Enter Company Name or Stock Ticker:",
-    value=preset if preset else "Systems Limited",
-    placeholder="e.g. Systems Limited, OpenAI, NVDA, Emumba, Apple, TSLA..."
+    value=preset if preset else "",
+    placeholder="e.g. Microsoft, Apple, NVIDIA, OpenAI, Tesla, Amazon, Systems Limited..."
 )
 
 execute_btn = st.button("🔍 Launch Deep Multi-Agent Investigation", type="primary", use_container_width=True)
 
 if execute_btn or preset:
-    with st.status("🚀 Parent Agent orchestrating deep investigation...", expanded=True) as status:
-        st.write("🔍 **Parent Agent**: Decomposing query and resolving verified entity classification...")
-        
+    query_target = (preset if preset else target_input).strip()
+    if not query_target:
+        st.warning("⚠️ Please enter a company name or stock ticker to begin the investigation.")
+        st.stop()
+
+    with st.status(f"🚀 Multi-Agent Team Investigating: '{query_target}'...", expanded=True) as status:
         dossier = None
         pdf_path = None
-        
-        # 1. Attempt call to FastAPI backend
-        if backend_online:
-            st.write("🌐 Querying FastAPI Backend (`POST /api/research`)...")
-            try:
-                response = requests.post(
-                    f"{API_BASE_URL}/api/research",
-                    json={"target": target_input},
-                    timeout=300
-                )
-                if response.status_code == 200:
-                    payload = response.json()
-                    dossier = payload.get("dossier")
-                    pdf_filename = payload.get("pdf_filename")
-                    pdf_path = os.path.join("reports", pdf_filename)
-                else:
-                    st.error(f"Backend error: {response.text}")
-            except Exception as e:
-                st.warning(f"Backend request failed: {e}. Falling back to direct agent execution.")
+        execution_time = None
 
-        # 2. Fallback: Direct Agent Execution if backend not running
+        # 1. Attempt Streaming Call to FastAPI Backend
+        if backend_online:
+            status.write("🌐 Connecting to FastAPI Backend (`POST /api/research/stream`)...")
+            try:
+                with requests.post(
+                    f"{API_BASE_URL}/api/research/stream",
+                    json={"target": query_target},
+                    stream=True,
+                    timeout=300
+                ) as response:
+                    if response.status_code == 200:
+                        for line in response.iter_lines():
+                            if line:
+                                item = json.loads(line.decode("utf-8"))
+                                if item.get("type") == "progress":
+                                    evt = item["event"]
+                                    t = evt.get("time", 0.0)
+                                    agent = evt.get("agent", "")
+                                    msg = evt.get("message", "")
+                                    status.write(f"⏱️ **[{t:.1f}s]** `{agent}`: {msg}")
+                                elif item.get("type") == "done":
+                                    results = item.get("results", {})
+                                    dossier = results.get("dossier")
+                                    pdf_path = results.get("pdf_path")
+                                    execution_time = results.get("execution_time")
+                                elif item.get("type") == "error":
+                                    status.write(f"⚠️ Backend worker warning: {item.get('error')}")
+                    else:
+                        status.write(f"⚠️ Backend status {response.status_code}. Shifting to direct agent mode...")
+            except Exception as e:
+                status.write(f"⚠️ Backend connection unavailable ({e}). Shifting to direct agent mode...")
+
+        # 2. Fallback: Direct Agent Execution with live callback
         if not dossier:
-            st.write("⚡ Executing Multi-Agent supervisor directly...")
+            status.write("⚡ Initializing Multi-Agent supervisor in Direct Mode...")
+            import importlib
+            import agents.supervisor
+            importlib.reload(agents.supervisor)
             from agents.supervisor import ResearchSupervisor
             supervisor = ResearchSupervisor()
-            results = supervisor.run_investigation(target_input)
-            dossier = results["dossier"]
-            pdf_path = results["pdf_path"]
 
-        st.write("✅ All subagents delivered in-depth intelligence. Compiling complete executive briefing...")
-        status.update(label="🎯 Deep Investigation Complete!", state="complete", expanded=False)
+            def on_progress(evt):
+                t = evt.get("time", 0.0)
+                agent = evt.get("agent", "")
+                msg = evt.get("message", "")
+                status.write(f"⏱️ **[{t:.1f}s]** `{agent}`: {msg}")
+
+            try:
+                results = supervisor.run_investigation(query_target, progress_callback=on_progress)
+            except TypeError:
+                results = supervisor.run_investigation(query_target)
+
+            dossier = results.get("dossier")
+            pdf_path = results.get("pdf_path")
+            execution_time = results.get("execution_time")
+
+        time_display = f"{execution_time:.1f}s" if execution_time else "Done"
+        status.update(label=f"🎯 Deep Investigation Complete in {time_display}!", state="complete", expanded=False)
 
     if dossier:
         is_public = dossier.get("is_public", False)
         metrics = dossier.get("metrics", {})
-        company_name = dossier.get("company_name", target_input)
+        company_name = dossier.get("company_name", query_target)
         ticker = dossier.get("ticker", "UNLISTED")
+        final_time = dossier.get("execution_time") or execution_time
+        time_badge = f"<span class='badge-time'>⏱️ Research Completed in {final_time:.2f}s</span>" if final_time else ""
 
         # Top Badge & Entity Header
         st.markdown("---")
         header_col1, header_col2 = st.columns([3, 1])
         with header_col1:
             if is_public:
-                st.markdown(f"## {company_name} <span class='badge-public'>PUBLIC TRADED: {ticker}</span>", unsafe_allow_html=True)
+                st.markdown(f"## {company_name} <span class='badge-public'>PUBLIC TRADED: {ticker}</span> {time_badge}", unsafe_allow_html=True)
                 st.caption(f"Exchange: **{metrics.get('exchange', 'N/A')}** | Sector: **{metrics.get('sector', 'N/A')}** | Industry: **{metrics.get('industry', 'N/A')}**")
             else:
-                st.markdown(f"## {company_name} <span class='badge-private'>PRIVATELY HELD ENTERPRISE</span>", unsafe_allow_html=True)
+                st.markdown(f"## {company_name} <span class='badge-private'>PRIVATELY HELD ENTERPRISE</span> {time_badge}", unsafe_allow_html=True)
                 st.caption(f"Status: **Unlisted (No Public Stock Ticker)** | Reporting: **Exempt from SEC 10-K Filings**")
         
         with header_col2:

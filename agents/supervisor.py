@@ -3,9 +3,11 @@ from agents.financial_agent import FinancialAnalystAgent
 from agents.news_agent import NewsScoutAgent
 from agents.biography_agent import BiographyAgent
 from tools.pdf_tool import generate_pdf_report
-from typing import Dict, Any
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Any, Optional, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 import re
+import config
 
 class ResearchSupervisor(BaseAgent):
     """
@@ -27,24 +29,57 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         self.news_agent = NewsScoutAgent()
         self.biography_agent = BiographyAgent()
 
-    def run_investigation(self, target_input: str) -> Dict[str, Any]:
+    def run_investigation(self, target_input: str, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
         """
         Executes the full hierarchical multi-agent workflow:
         1. Subagents run concurrently in parallel via ThreadPoolExecutor.
         2. Parent Agent synthesizes data into deep Executive Briefing & Strategic Outlook.
         3. Compiles Markdown and PDF reports with detailed verified sources.
         """
+        start_time = time.time()
         clean_target = target_input.strip()
+
+        def emit(agent: str, role: str, status: str, message: str):
+            elapsed = round(time.time() - start_time, 1)
+            event = {
+                "time": elapsed,
+                "agent": agent,
+                "role": role,
+                "status": status,
+                "message": message
+            }
+            if progress_callback:
+                try:
+                    progress_callback(event)
+                except Exception:
+                    pass
+
+        emit("Research Supervisor", "Parent Director", "started", f"Initiating deep investigation project for '{clean_target}'...")
         print(f"\n[Parent Agent: {self.name}] Initiating research project for '{clean_target}'...")
         
         # Parallel Execution of Subagents
         print(f"---> [Concurrent Subagent Execution] Calling Financial Analyst, News Scout, and Corporate Biographer in parallel...")
-        
+        emit("Research Supervisor", "Parent Director", "dispatching", "Launching 3 specialized subagents in parallel: Financial Analyst, News Scout, and Corporate Biographer...")
+
+        emit("Financial Analyst Agent", "Financial Analyst", "running", "Querying market data, live valuation metrics, P/E ratio, and ticker resolution...")
+        emit("News Scout Agent", "News Scout", "running", "Scouring Google News RSS feeds for real-time market catalysts and sentiment...")
+        emit("Corporate Biographer Agent", "Corporate Biographer", "running", "Querying Wikipedia OpenSearch & company records for founding history and business model...")
+
         with ThreadPoolExecutor(max_workers=3) as executor:
             f_fin = executor.submit(self.financial_agent.analyze, clean_target)
             f_news = executor.submit(self.news_agent.analyze, clean_target)
             f_bio = executor.submit(self.biography_agent.analyze, clean_target)
             
+            futures_map = {
+                f_fin: ("Financial Analyst Agent", "Financial Analyst"),
+                f_news: ("News Scout Agent", "News Scout"),
+                f_bio: ("Corporate Biographer Agent", "Corporate Biographer")
+            }
+
+            for future in as_completed(futures_map):
+                agent_name, role_name = futures_map[future]
+                emit(agent_name, role_name, "completed", f"{role_name} completed analysis and returned validated intelligence.")
+
             fin_data = f_fin.result()
             news_data = f_news.result()
             bio_data = f_bio.result()
@@ -57,11 +92,15 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         
         if is_public:
             print(f"[Parent Agent] Classified as PUBLIC CORPORATION -> Ticker: {ticker} | Exchange: {metrics.get('exchange', 'Public')}")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified as PUBLIC CORPORATION -> Ticker: {ticker} | Exchange: {metrics.get('exchange', 'Public')}")
         else:
             print(f"[Parent Agent] Classified as PRIVATE ENTERPRISE -> Status: Unlisted (No public stock ticker)")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified as PRIVATELY HELD ENTERPRISE -> Status: Unlisted (No public stock ticker)")
 
         # Step 2: Parent Synthesis
         print(f"\n[Parent Agent: {self.name}] Synthesizing multi-agent intelligence streams...")
+        cfg = config.get_config()
+        emit("Research Supervisor", "Parent Director", "synthesizing", f"Synthesizing comprehensive executive briefing & strategic outlook via {cfg['PROVIDER'].upper()} LLM...")
         
         synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Public Entity: {is_public}).
 Analyze all findings thoroughly across two extensive sections:
@@ -144,11 +183,13 @@ STRATEGIC_OUTLOOK:
                 )
 
         # Step 3: Final Compilation & Export
+        elapsed_time = round(time.time() - start_time, 2)
         final_dossier = {
             "company_name": company_name,
             "ticker": ticker,
             "is_public": is_public,
             "metrics": metrics,
+            "execution_time": elapsed_time,
             "executive_summary": exec_summary,
             "corporate_background": bio_data.get("analysis", ""),
             "financial_analysis": fin_data.get("analysis", ""),
@@ -158,6 +199,7 @@ STRATEGIC_OUTLOOK:
         }
 
         # Generate Reports
+        emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade PDF dossier and Markdown intelligence files...")
         clean_name = re.sub(r'[^a-zA-Z0-9]', '_', clean_target).lower()
         pdf_path = f"reports/{clean_name}_intelligence_dossier.pdf"
         md_path = f"reports/{clean_name}_intelligence_dossier.md"
@@ -165,14 +207,16 @@ STRATEGIC_OUTLOOK:
         generate_pdf_report(final_dossier, pdf_path)
         self._write_markdown_report(final_dossier, md_path)
         
-        print(f"\n[Parent Agent: {self.name}] Investigation completed!")
+        emit("Research Supervisor", "Parent Director", "complete", f"Investigation completed successfully in {elapsed_time}s! All dossiers verified.")
+        print(f"\n[Parent Agent: {self.name}] Investigation completed in {elapsed_time}s!")
         print(f"  -> PDF Report: {pdf_path}")
         print(f"  -> Markdown Report: {md_path}")
         
         return {
             "dossier": final_dossier,
             "pdf_path": pdf_path,
-            "md_path": md_path
+            "md_path": md_path,
+            "execution_time": elapsed_time
         }
 
     def _write_markdown_report(self, dossier: Dict[str, Any], path: str):
