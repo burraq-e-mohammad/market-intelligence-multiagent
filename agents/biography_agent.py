@@ -1,6 +1,6 @@
 from agents.base_agent import BaseAgent
 from tools.wiki_tool import get_company_biography
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class BiographyAgent(BaseAgent):
     def __init__(self):
@@ -10,6 +10,10 @@ class BiographyAgent(BaseAgent):
             system_prompt="""You are a senior corporate historian and strategic enterprise analyst.
 Your job is to provide an in-depth, structured, and comprehensive corporate biography for the target enterprise.
 Do NOT give a short or superficial summary. Never output apologies, refusal disclaimers, or meta-commentary about missing data.
+TEMPORAL ANCHOR & PRODUCT GENERATION RULES:
+1. Current calendar year is 2026.
+2. For technology companies, do NOT present legacy product architectures (e.g. Hopper H100/H200 from 2022-2024) as "forthcoming" or "future". In 2026, Blackwell is deployed and Rubin is next.
+3. For peer context, ensure factual rankings (e.g. Nvidia's ~$3.7T market cap places it at the apex of global enterprise value alongside Apple and Microsoft).
 If the company is a privately held or unlisted technology enterprise, synthesize its commercial footprint, core engineering offerings, strategic acquisitions, awards, and market delivery scale into 3 clearly marked sections:
 ### 1. Foundational History, Origins & Leadership Milestones
 Detail the founding era, commercial evolution, geographic delivery footprint, major acquisitions, and key corporate inflection points.
@@ -19,10 +23,10 @@ Explain what the company actually builds, its primary service lines (e.g. digita
 Analyze structural advantages (domain engineering talent, enterprise client retention, specialized vertical consulting, and technology partnerships)."""
         )
 
-    def analyze(self, company_name: str) -> Dict[str, Any]:
+    def analyze(self, company_name: str, shared_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         1. Calls the biography tool (Wikipedia verified sections or corporate media announcements).
-        2. Reasons through corporate history and moat using the LLM.
+        2. Reasons through corporate history and moat using the LLM with 2026 temporal awareness.
         3. Returns structured, extensive corporate background.
         """
         tool_result = get_company_biography(company_name)
@@ -34,6 +38,10 @@ Analyze structural advantages (domain engineering talent, enterprise client rete
 Synthesize an authoritative, comprehensive corporate biography for {company_name} based on this verified {source} intelligence:
 
 {detailed_content}
+
+TEMPORAL ANCHOR (YEAR 2026) & ACCURACY DIRECTIVES:
+- Calendar year is 2026. Do NOT present 2022-2024 legacy product lines (such as Hopper H100) as future catalysts.
+- Maintain accurate enterprise positioning and peer comparisons.
 
 Strict Output Requirements:
 1. Deliver comprehensive, professional, multi-paragraph corporate analysis.

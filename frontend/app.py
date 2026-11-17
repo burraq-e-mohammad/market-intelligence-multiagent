@@ -86,10 +86,11 @@ with st.sidebar:
     st.markdown("### 🤖 Multi-Agent Team")
     st.markdown("""
     * **👑 Parent Agent**: Research Director
-    * **📊 Subagent 1**: Financial Analyst
+    * **📊 Subagent 1**: Financial Analyst (Deterministic Math)
     * **📰 Subagent 2**: News & Sentiment Scout
     * **🏛️ Subagent 3**: Corporate Biographer
-    * **📑 Subagent 4**: PDF & Dossier Publisher
+    * **🛡️ Subagent 4**: QA Critic & Fact-Checker
+    * **📑 Subagent 5**: PDF & Dossier Publisher
     """)
     st.divider()
     
@@ -187,6 +188,7 @@ if execute_btn or preset:
             import agents.biography_agent
             import agents.financial_agent
             import agents.news_agent
+            import agents.qa_critic
             import agents.supervisor
 
             importlib.reload(tools.wiki_tool)
@@ -195,6 +197,7 @@ if execute_btn or preset:
             importlib.reload(agents.biography_agent)
             importlib.reload(agents.financial_agent)
             importlib.reload(agents.news_agent)
+            importlib.reload(agents.qa_critic)
             importlib.reload(agents.supervisor)
 
             from agents.supervisor import ResearchSupervisor
@@ -251,13 +254,14 @@ if execute_btn or preset:
                 )
 
         # KPI Metrics Cards
-        st.markdown("### 📊 Fundamental Snapshot")
+        st.markdown("### 📊 Fundamental Snapshot (Single Source of Truth)")
         if is_public:
-            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+            kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
             kpi1.metric("Stock Price", str(metrics.get("current_price", "N/A")))
             kpi2.metric("Market Cap", str(metrics.get("market_cap", "N/A")))
-            kpi3.metric("P/E Ratio", str(metrics.get("pe_ratio", "N/A")))
-            kpi4.metric("Consensus Rating", str(metrics.get("analyst_rating", "N/A")), delta=f"Target: {metrics.get('analyst_target_price', 'N/A')}")
+            kpi3.metric("Trailing P/E", str(metrics.get("trailing_pe", metrics.get("pe_ratio", "N/A"))))
+            kpi4.metric("Forward P/E", str(metrics.get("forward_pe", "N/A")))
+            kpi5.metric("Consensus Rating", str(metrics.get("analyst_rating", "N/A")), delta=f"Target: {metrics.get('analyst_target_price', 'N/A')}")
         else:
             p1, p2, p3, p4 = st.columns(4)
             p1.metric("Entity Classification", "Privately Held")

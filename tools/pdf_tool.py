@@ -1,30 +1,83 @@
+import os
+import re
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from datetime import datetime
 from typing import Dict, Any, List
-import os
 
 def sanitize_text(text: str) -> str:
-    """Sanitize unicode characters (like en-dashes, em-dashes, smart quotes, bullets) for standard PDF fonts."""
+    """
+    Sanitize unicode characters, dashes, quotes, and LaTeX artifacts for clean typography in PDF & Markdown.
+    Completely eliminates '?' character corruptions and broken delimiters.
+    """
     if not text:
         return ""
+    
+    # 1. Clean raw LaTeX / Math artifacts
+    # e.g. $Al^{**}$ -> AI, $.^{**}19.07x^{**}$ -> 19.07x, $3.64T -> $3.64T
+    text = re.sub(r'\$\.?(?:\^\{?\*+\}?)?([0-9\.\,]+x?)(?:\^\{?\*+\}?)?\$?', r'\1', text)
+    text = re.sub(r'\$([A-Za-z0-9\.\,\%\+\-]+)\$', r'\1', text)
+    text = text.replace("$Al^{**}$", "AI").replace("$AI$", "AI").replace("$Al$", "AI")
+    text = text.replace("^{**}", "").replace("^{2}", "2").replace("^{3}", "3")
+    text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
+    text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
+    
+    # 2. Comprehensive Unicode Dash & Hyphen mapping (prevents '?' in date ranges e.g. 1999-2006, Nov 16-17)
+    dash_chars = [
+        "\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015", 
+        "\u2212", "\ufe58", "\ufe63", "\uff0d", "\u00ad"
+    ]
+    for d in dash_chars:
+        text = text.replace(d, "-")
+
+    # 3. Comprehensive Quotes & Typographic symbols mapping
     replacements = {
-        "\u2013": "-",   # en-dash
-        "\u2014": "--",  # em-dash
         "\u2018": "'",   # left single quote
         "\u2019": "'",   # right single quote
+        "\u201a": "'",   # low single quote
+        "\u201b": "'",   # high single quote
         "\u201c": '"',   # left double quote
         "\u201d": '"',   # right double quote
-        "\u2022": "*",   # bullet
+        "\u201e": '"',   # low double quote
+        "\u201f": '"',   # high double quote
+        "\u2032": "'",   # prime
+        "\u2033": '"',   # double prime
+        "\u2022": "* ",  # bullet
+        "\u25cf": "* ",  # black circle bullet
+        "\u25cb": "* ",  # white circle
+        "\u25aa": "* ",  # black square
         "\u2026": "...", # ellipsis
         "\u00a0": " ",   # non-breaking space
-        "\u20b9": "INR", # Indian Rupee symbol
-        "\u20ac": "EUR", # Euro symbol
-        "\u00a3": "GBP", # Pound symbol
+        "\u200b": "",    # zero-width space
+        "\u200c": "",    # zero-width non-joiner
+        "\u200d": "",    # zero-width joiner
+        "\ufeff": "",    # byte order mark
+        "\u20b9": "INR ", # Indian Rupee
+        "\u20ac": "EUR ", # Euro
+        "\u00a3": "GBP ", # Pound
+        "\u00a5": "JPY ", # Yen
+        "\u2248": "~",   # approximately equal
+        "\u2264": "<=",  # less than or equal
+        "\u2265": ">=",  # greater than or equal
+        "\u2192": "->",  # right arrow
+        "\u2190": "<-",  # left arrow
+        "\u2194": "<->", # left-right arrow
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
-    return text.encode("latin-1", "replace").decode("latin-1")
+
+    # 4. Safe character filtering for PDF latin-1 font table
+    clean_chars = []
+    for char in text:
+        cp = ord(char)
+        if cp < 128:
+            clean_chars.append(char)
+        elif 160 <= cp <= 255:
+            clean_chars.append(char)
+        else:
+            clean_chars.append(" ")
+            
+    return "".join(clean_chars)
 
 class IntelligenceReportPDF(FPDF):
     def __init__(self, company_name: str, ticker: str):
@@ -130,8 +183,10 @@ def generate_pdf_report(
         pdf.section_title("1. Financial Health & Valuation Snapshot (Public Equity)")
         kpis = [
             ("Stock Price", str(metrics.get("current_price", "N/A")), "Market Cap", str(metrics.get("market_cap", "N/A"))),
-            ("P/E Ratio", str(metrics.get("pe_ratio", "N/A")), "Total Revenue", str(metrics.get("total_revenue", "N/A"))),
-            ("52-Wk Range", f"{metrics.get('52_week_low', 'N/A')} - {metrics.get('52_week_high', 'N/A')}", "Profit Margin", str(metrics.get("profit_margins", "N/A"))),
+            ("Trailing P/E", str(metrics.get("trailing_pe", metrics.get("pe_ratio", "N/A"))), "Forward P/E", str(metrics.get("forward_pe", "N/A"))),
+            ("PEG Ratio", str(metrics.get("peg_ratio", "N/A")), "TTM Revenue", str(metrics.get("total_revenue", "N/A"))),
+            ("Gross Margin", str(metrics.get("gross_margins", "N/A")), "Profit Margin", str(metrics.get("profit_margins", "N/A"))),
+            ("52-Wk Range", f"{metrics.get('52_week_low', 'N/A')} - {metrics.get('52_week_high', 'N/A')}", "YoY Growth", str(metrics.get("revenue_growth_yoy", "N/A"))),
             ("Analyst Target", str(metrics.get("analyst_target_price", "N/A")), "Consensus Rating", str(metrics.get("analyst_rating", "N/A")))
         ]
     else:

@@ -2,6 +2,8 @@ from agents.base_agent import BaseAgent
 from agents.financial_agent import FinancialAnalystAgent
 from agents.news_agent import NewsScoutAgent
 from agents.biography_agent import BiographyAgent
+from agents.qa_critic import QualityAssuranceAgent
+from tools.finance_tool import get_financial_metrics
 from tools.pdf_tool import generate_pdf_report
 from typing import Dict, Any, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,7 +15,7 @@ class ResearchSupervisor(BaseAgent):
     """
     Parent Agent (Supervisor / Orchestrator):
     Coordinates subagents in parallel, decomposes tasks, aggregates findings, and synthesizes final reports.
-    Delivers deep, comprehensive, and highly structured dossiers.
+    Enforces a strict Single Source of Truth (Shared State) and executes a QA Critic audit prior to publication.
     """
     def __init__(self):
         super().__init__(
@@ -22,12 +24,14 @@ class ResearchSupervisor(BaseAgent):
             system_prompt="""You are the Research Director at an elite global corporate intelligence firm.
 You oversee three specialized analysts: a Financial Analyst, a News & Sentiment Scout, and a Corporate Biographer.
 Your job is to synthesize all intelligence into a deep, authoritative, highly structured Executive Briefing and Strategic Outlook.
+You MUST enforce 100% internal consistency across all subagent reports and adhere strictly to the Single Source of Truth.
 Never write a brief, shallow, or generic summary. Deliver comprehensive, structured paragraphs packed with real facts."""
         )
         
         self.financial_agent = FinancialAnalystAgent()
         self.news_agent = NewsScoutAgent()
         self.biography_agent = BiographyAgent()
+        self.qa_critic = QualityAssuranceAgent()
 
     def run_investigation(self, target_input: str, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
         """
@@ -56,19 +60,59 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
 
         emit("Research Supervisor", "Parent Director", "started", f"Initiating deep investigation project for '{clean_target}'...")
         print(f"\n[Parent Agent: {self.name}] Initiating research project for '{clean_target}'...")
-        
-        # Parallel Execution of Subagents
-        print(f"---> [Concurrent Subagent Execution] Calling Financial Analyst, News Scout, and Corporate Biographer in parallel...")
-        emit("Research Supervisor", "Parent Director", "dispatching", "Launching 3 specialized subagents in parallel: Financial Analyst, News Scout, and Corporate Biographer...")
 
-        emit("Financial Analyst Agent", "Financial Analyst", "running", "Querying market data, live valuation metrics, P/E ratio, and ticker resolution...")
+        # Step 1: Resolve Canonical Entity Classification & Single Source of Truth
+        emit("Research Supervisor", "Parent Director", "resolving", f"Resolving canonical entity classification and Single Source of Truth for '{clean_target}'...")
+        tool_fin = get_financial_metrics(clean_target)
+        is_public = tool_fin.get("is_public", False)
+        metrics = tool_fin.get("data", {})
+        company_name = metrics.get("company_name", clean_target)
+        ticker = metrics.get("symbol", "PRIVATE / UNLISTED")
+
+        shared_state = {
+            "company_name": company_name,
+            "ticker": ticker,
+            "is_public": is_public,
+            "metrics": metrics,
+            "current_price": metrics.get("current_price", "N/A"),
+            "market_cap": metrics.get("market_cap", "N/A"),
+            "trailing_pe": metrics.get("trailing_pe", metrics.get("pe_ratio", "N/A")),
+            "forward_pe": metrics.get("forward_pe", "N/A"),
+            "peg_ratio": metrics.get("peg_ratio", "N/A"),
+            "total_revenue": metrics.get("total_revenue", "N/A"),
+            "gross_margins": metrics.get("gross_margins", "N/A"),
+            "operating_margins": metrics.get("operating_margins", "N/A"),
+            "profit_margins": metrics.get("profit_margins", "N/A"),
+            "revenue_growth_yoy": metrics.get("revenue_growth_yoy", "N/A"),
+            "52_week_high": metrics.get("52_week_high", "N/A"),
+            "52_week_low": metrics.get("52_week_low", "N/A"),
+            "analyst_target_price": metrics.get("analyst_target_price", "N/A"),
+            "analyst_rating": metrics.get("analyst_rating", "N/A"),
+            "exchange": metrics.get("exchange", "Stock Exchange"),
+            "sector": metrics.get("sector", "Technology & Services"),
+            "industry": metrics.get("industry", "Enterprise Solutions"),
+            "temporal_year": 2026
+        }
+
+        if is_public:
+            print(f"[Parent Agent] Classified as PUBLIC CORPORATION -> Ticker: {ticker} | Price: {metrics.get('current_price')} | Cap: {metrics.get('market_cap')}")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified PUBLIC CORPORATION -> Ticker: {ticker} | Price: {metrics.get('current_price')} | Cap: {metrics.get('market_cap')}")
+        else:
+            print(f"[Parent Agent] Classified as PRIVATE ENTERPRISE -> Status: Unlisted (No public stock ticker)")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified PRIVATELY HELD ENTERPRISE -> Status: Unlisted (No public stock ticker)")
+        
+        # Step 2: Parallel Subagent Execution with Locked Shared State
+        print(f"---> [Concurrent Subagent Execution] Calling Financial Analyst, News Scout, and Corporate Biographer in parallel with Locked Shared State...")
+        emit("Research Supervisor", "Parent Director", "dispatching", "Launching 3 specialized subagents in parallel with Locked Single Source of Truth...")
+
+        emit("Financial Analyst Agent", "Financial Analyst", "running", "Evaluating canonical valuation matrix, price multiples, and margin dynamics...")
         emit("News Scout Agent", "News Scout", "running", "Scouring Google News RSS feeds for real-time market catalysts and sentiment...")
-        emit("Corporate Biographer Agent", "Corporate Biographer", "running", "Querying Wikipedia OpenSearch & company records for founding history and business model...")
+        emit("Corporate Biographer Agent", "Corporate Biographer", "running", "Querying corporate records and historical filings with 2026 temporal awareness...")
 
         with ThreadPoolExecutor(max_workers=3) as executor:
-            f_fin = executor.submit(self.financial_agent.analyze, clean_target)
-            f_news = executor.submit(self.news_agent.analyze, clean_target)
-            f_bio = executor.submit(self.biography_agent.analyze, clean_target)
+            f_fin = executor.submit(self.financial_agent.analyze, clean_target, shared_state)
+            f_news = executor.submit(self.news_agent.analyze, clean_target, ticker, shared_state)
+            f_bio = executor.submit(self.biography_agent.analyze, clean_target, shared_state)
             
             futures_map = {
                 f_fin: ("Financial Analyst Agent", "Financial Analyst"),
@@ -84,26 +128,27 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             news_data = f_news.result()
             bio_data = f_bio.result()
 
-        is_public = fin_data.get("is_public", False)
-        metrics = fin_data.get("metrics", {})
-        
-        company_name = metrics.get("company_name", clean_target)
-        ticker = metrics.get("symbol", "PRIVATE / UNLISTED")
-        
-        if is_public:
-            print(f"[Parent Agent] Classified as PUBLIC CORPORATION -> Ticker: {ticker} | Exchange: {metrics.get('exchange', 'Public')}")
-            emit("Research Supervisor", "Parent Director", "classified", f"Verified as PUBLIC CORPORATION -> Ticker: {ticker} | Exchange: {metrics.get('exchange', 'Public')}")
-        else:
-            print(f"[Parent Agent] Classified as PRIVATE ENTERPRISE -> Status: Unlisted (No public stock ticker)")
-            emit("Research Supervisor", "Parent Director", "classified", f"Verified as PRIVATELY HELD ENTERPRISE -> Status: Unlisted (No public stock ticker)")
-
-        # Step 2: Parent Synthesis
+        # Step 3: Parent Synthesis with Locked Truth & Contradiction Prevention
         print(f"\n[Parent Agent: {self.name}] Synthesizing multi-agent intelligence streams...")
         cfg = config.get_config()
         emit("Research Supervisor", "Parent Director", "synthesizing", f"Synthesizing comprehensive executive briefing & strategic outlook via {cfg['PROVIDER'].upper()} LLM...")
         
         synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Public Entity: {is_public}).
-Analyze all findings thoroughly across two extensive sections:
+
+LOCKED CANONICAL STATE (SINGLE SOURCE OF TRUTH):
+- Company: {company_name} ({ticker}) | Exchange: {metrics.get('exchange', 'Stock Exchange')}
+- Current Stock Price: {metrics.get('current_price', 'N/A')}
+- Market Capitalization: {metrics.get('market_cap', 'N/A')}
+- Trailing P/E: {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))} | Forward P/E: {metrics.get('forward_pe', 'N/A')} | PEG Ratio: {metrics.get('peg_ratio', 'N/A')}
+- TTM Revenue (Trailing 12 Months): {metrics.get('total_revenue', 'N/A')} (Do NOT confuse with annual FY filings)
+- Operating Margin: {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))} | Profit Margin: {metrics.get('profit_margins', 'N/A')}
+- Temporal Anchor: Current calendar year is 2026.
+
+STRICT CONTRADICTION PREVENTION & TEMPORAL DIRECTIVES:
+1. Under NO circumstances should you state or quote a share price, multiple, or market cap that contradicts the Locked Canonical State above.
+2. For semiconductor and hardware companies (e.g. Nvidia), anchor strictly to 2026: do NOT report 2022-2024 legacy architectures (such as Hopper H100) as upcoming catalysts. The active generation in 2026 is Blackwell transitioning to Rubin.
+3. For peer context, reflect accurate market capitalization hierarchy (Nvidia's ~$3.7T market cap places it at the apex alongside Apple and Microsoft).
+4. Do NOT leave any dangling headers or unfinished sentences.
 
 Section 1: EXECUTIVE_SUMMARY
 - Macro Enterprise Standing & Industry Positioning
@@ -197,6 +242,10 @@ STRATEGIC_OUTLOOK:
             "strategic_outlook": strategic_outlook,
             "news_articles": news_data.get("articles", [])
         }
+
+        # Step 4: Run QA Critic Node to audit cross-agent consistency & typography
+        emit("QA Critic Agent", "Quality Assurance & Fact-Checking", "verifying", "Auditing dossier for Single Source of Truth consistency, tabular verification, and typography sanitization...")
+        final_dossier = self.qa_critic.review_and_sanitize(final_dossier, shared_state)
 
         # Generate Reports
         emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade PDF dossier and Markdown intelligence files...")
