@@ -450,17 +450,24 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             target_mean_price = info.get("targetMeanPrice")
             recommendation = info.get("recommendationKey", "N/A")
 
-            # Capture Extended-Hours (Post-Market / Pre-Market) trading quote for post-earnings price context
+            # Capture Extended-Hours (Post-Market / Pre-Market) trading quote deterministically
+            # NEVER trust Yahoo's raw postMarketChangePercent scaling (0.8471% vs 0.008471); compute exact % from prices!
             post_price = info.get("postMarketPrice")
-            post_chg = info.get("postMarketChangePercent")
             pre_price = info.get("preMarketPrice")
-            pre_chg = info.get("preMarketChangePercent")
             extended_hours_context = ""
-            if post_price is not None:
-                pct_str = f" ({post_chg * 100:+.2f}%)" if isinstance(post_chg, (int, float)) and abs(post_chg) < 1 else (f" ({post_chg:+.2f}%)" if isinstance(post_chg, (int, float)) else "")
+            if isinstance(post_price, (int, float)) and post_price > 0:
+                if isinstance(current_price, (int, float)) and current_price > 0:
+                    delta_pct = ((post_price - current_price) / current_price) * 100.0
+                    pct_str = f" ({delta_pct:+.2f}%)"
+                else:
+                    pct_str = ""
                 extended_hours_context = f"After-Hours: {post_price:.2f} {currency}{pct_str}"
-            elif pre_price is not None:
-                pct_str = f" ({pre_chg * 100:+.2f}%)" if isinstance(pre_chg, (int, float)) and abs(pre_chg) < 1 else (f" ({pre_chg:+.2f}%)" if isinstance(pre_chg, (int, float)) else "")
+            elif isinstance(pre_price, (int, float)) and pre_price > 0:
+                if isinstance(current_price, (int, float)) and current_price > 0:
+                    delta_pct = ((pre_price - current_price) / current_price) * 100.0
+                    pct_str = f" ({delta_pct:+.2f}%)"
+                else:
+                    pct_str = ""
                 extended_hours_context = f"Pre-Market: {pre_price:.2f} {currency}{pct_str}"
 
             # Universal Fiscal Year End detection (from SEC/Yahoo lastFiscalYearEnd timestamp)

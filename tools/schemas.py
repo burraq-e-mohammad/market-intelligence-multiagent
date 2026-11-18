@@ -23,6 +23,8 @@ class VerifiedOfficer(BaseModel):
     def clean_name(cls, v: str) -> str:
         # Remove honorific prefixes like Mr., Ms., Dr.
         cleaned = re.sub(r'^(?:Mr\.|Ms\.|Mrs\.|Dr\.|Prof\.)\s+', '', v.strip())
+        # Strip trailing SEC proxy acronyms / credentials (e.g. "Bradford L. Smith LCA", "Esq.", "CFA", "CPA", "PhD", "JD", "MBA")
+        cleaned = re.sub(r'(?:,?\s+(?:LCA|CFA|CPA|JD|J\.D\.|MD|M\.D\.|PhD|Ph\.D\.|MBA|Esq\.?|Jr\.?|Sr\.?|II|III|IV))+\s*$', '', cleaned)
         # Collapse whitespace
         cleaned = " ".join(cleaned.split())
         # Reject clearly invalid non-person phrases
@@ -173,31 +175,72 @@ def reconcile_officers(
 
     all_cands = extracted_from_gov + list(candidates)
 
-    # 3. Mark departed executives as former and deduplicate by name (keeping best priority)
-    by_name: Dict[str, VerifiedOfficer] = {}
+    nickname_groups = [
+        {"bill", "william", "will"},
+        {"bob", "robert", "rob", "bobby"},
+        {"jim", "james", "jimmy"},
+        {"dick", "richard", "rick"},
+        {"chuck", "charles", "charlie"},
+        {"ted", "edward", "ed"},
+        {"mike", "michael"},
+        {"dave", "david"},
+        {"dan", "daniel"},
+        {"tom", "thomas"},
+        {"joe", "joseph"},
+        {"tony", "anthony"},
+        {"andy", "andrew"}
+    ]
+
+    def _first_last(name_str: str):
+        # Strip single-letter middle initials (e.g. "Bradford L. Smith" -> ["bradford", "smith"])
+        parts = [p.strip(".,").lower() for p in name_str.split() if len(p.strip(".,")) > 1]
+        if len(parts) >= 2:
+            return parts[0], parts[-1]
+        raw = [p.strip(".,").lower() for p in name_str.split()]
+        return (raw[0], raw[-1]) if len(raw) >= 2 else (name_str.lower(), "")
+
+    def _same_person(name_a: str, name_b: str) -> bool:
+        fa, la = _first_last(name_a)
+        fb, lb = _first_last(name_b)
+        if not la or la != lb:
+            return False
+        if fa == fb:
+            return True
+        # Prefix match handles Brad/Bradford, Tim/Timothy, Greg/Gregory, Chris/Christopher, Sam/Samuel, Satya/Satya
+        if len(fa) >= 3 and len(fb) >= 3 and (fa.startswith(fb) or fb.startswith(fa)):
+            return True
+        for grp in nickname_groups:
+            if fa in grp and fb in grp:
+                return True
+        return False
+
+    # 3. Mark departed executives as former and deduplicate by fuzzy person identity (keeping highest authority)
+    deduped: List[VerifiedOfficer] = []
     for officer in all_cands:
-        norm_key = re.sub(r'\s+[a-z]\.?\s+', ' ', officer.name.lower()).strip()
-        is_departed = any(
-            norm_key == re.sub(r'\s+[a-z]\.?\s+', ' ', d).strip() or officer.name.lower() == d
-            for d in departed_names
-        )
+        is_departed = any(_same_person(officer.name, d) for d in departed_names)
         if is_departed or officer.is_former:
             continue
 
-        existing = by_name.get(norm_key)
-        if not existing:
-            by_name[norm_key] = officer
+        matched_idx = None
+        for idx, existing in enumerate(deduped):
+            if _same_person(officer.name, existing.name):
+                matched_idx = idx
+                break
+
+        if matched_idx is None:
+            deduped.append(officer)
         else:
-            # Prefer lower priority number (higher authority); break ties by more specific title
+            existing = deduped[matched_idx]
+            # Prefer lower priority number (higher authority); break ties by Interim CEO or cleaner name
             if officer.priority < existing.priority:
-                by_name[norm_key] = officer
+                deduped[matched_idx] = officer
             elif officer.priority == existing.priority:
                 if officer.role_category == "INTERIM_CEO" and existing.role_category != "INTERIM_CEO":
-                    by_name[norm_key] = officer
-                elif len(officer.title) > len(existing.title):
-                    by_name[norm_key] = officer
+                    deduped[matched_idx] = officer
+                elif len(officer.title) > len(existing.title) and len(officer.name) <= len(existing.name):
+                    deduped[matched_idx] = officer
 
-    active = sorted(by_name.values(), key=lambda o: (o.priority, 0 if o.role_category in ("INTERIM_CEO", "CEO") else 1))
+    active = sorted(deduped, key=lambda o: (o.priority, 0 if o.role_category in ("INTERIM_CEO", "CEO") else 1))
 
     # 4. Enforce Singular CEO / Interim CEO Cardinality
     has_interim_ceo = any(o.role_category == "INTERIM_CEO" for o in active)

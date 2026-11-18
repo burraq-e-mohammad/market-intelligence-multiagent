@@ -93,11 +93,14 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
                 parsed = parse_officer_string(raw_str, source="Verified Profile", priority=2)
                 if parsed:
                     pre_officer_cands.append(parsed)
-        for sec_off in (metrics.get("sec_officers") or []):
-            try:
-                pre_officer_cands.append(VerifiedOfficer(**sec_off))
-            except Exception:
-                pass
+        # Only fall back to Yahoo/SEC companyOfficers when no current Infobox/Registry roster exists
+        # (prevents lagging SEC proxy feeds from re-introducing departed executives like former COOs)
+        if not pre_officer_cands:
+            for sec_off in (metrics.get("sec_officers") or []):
+                try:
+                    pre_officer_cands.append(VerifiedOfficer(**sec_off))
+                except Exception:
+                    pass
         pre_reconciled = reconcile_officers(pre_officer_cands, breaking_governance=pre_breaking_gov)
 
         shared_state = {
@@ -202,11 +205,12 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
                 parsed = parse_officer_string(raw_str, source="Verified Profile", priority=2)
                 if parsed:
                     officer_candidates.append(parsed)
-        for sec_off in (shared_state.get("sec_officers") or []):
-            try:
-                officer_candidates.append(VerifiedOfficer(**sec_off))
-            except Exception:
-                pass
+        if not officer_candidates:
+            for sec_off in (shared_state.get("sec_officers") or []):
+                try:
+                    officer_candidates.append(VerifiedOfficer(**sec_off))
+                except Exception:
+                    pass
 
         reconciled_officers = reconcile_officers(officer_candidates, breaking_governance=breaking_gov)
         verified_leadership = [o.formatted() for o in reconciled_officers]
