@@ -55,11 +55,9 @@ class QualityAssuranceAgent:
         if breaking_reg:
             outlook = dossier.get("strategic_outlook", "")
             news = dossier.get("recent_news_analysis", "")
-            # Build a crisp, concise heading (split on :, ;, (, or comma and cap cleanly on word boundary)
+            # Build a clean heading up to the first clause delimiter (pdf_tool wraps headings via multi_cell)
             raw_head = re.split(r'[:;\(\,]', breaking_reg[0])[0].strip().rstrip('.')
-            if len(raw_head) > 62:
-                raw_head = raw_head[:62].rsplit(' ', 1)[0].rstrip(',;:- ')
-            first_reg_term = raw_head or "Regulatory & Export-Control Oversight"
+            first_reg_term = raw_head or "Regulatory & Compliance Oversight"
             if first_reg_term.lower() not in outlook.lower() and first_reg_term.lower() not in news.lower():
                 clean_reg_details = "; ".join(r.rstrip(". ") for r in breaking_reg)
                 reg_block = (
