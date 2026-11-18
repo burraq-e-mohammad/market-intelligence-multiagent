@@ -39,15 +39,15 @@ def format_number(val: Optional[float], prefix: str = "$", currency: str = "USD"
     curr_prefix = f"{currency} " if currency != "USD" else prefix
     abs_val = abs(val)
     if abs_val >= 1e12:
-        return f"{curr_prefix}{val / 1e12:.2f}T"
+        return f"{curr_prefix}{val / 1e12:,.2f}T"
     elif abs_val >= 1e9:
-        return f"{curr_prefix}{val / 1e9:.2f}B"
+        return f"{curr_prefix}{val / 1e9:,.2f}B"
     elif abs_val >= 1e6:
-        return f"{curr_prefix}{val / 1e6:.2f}M"
+        return f"{curr_prefix}{val / 1e6:,.2f}M"
     elif abs_val >= 1e3:
-        return f"{curr_prefix}{val / 1e3:.2f}K"
+        return f"{curr_prefix}{val / 1e3:,.2f}K"
     else:
-        return f"{curr_prefix}{val:.2f}"
+        return f"{curr_prefix}{val:,.2f}"
 
 def get_revenue_scale_descriptor(val: Optional[float]) -> str:
     """Dynamically categorizes corporate revenue scale to prevent double/triple-digit wording hallucinations."""
@@ -461,14 +461,14 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                     pct_str = f" ({delta_pct:+.2f}%)"
                 else:
                     pct_str = ""
-                extended_hours_context = f"After-Hours: {post_price:.2f} {currency}{pct_str}"
+                extended_hours_context = f"After-Hours: {post_price:,.2f} {currency}{pct_str}"
             elif isinstance(pre_price, (int, float)) and pre_price > 0:
                 if isinstance(current_price, (int, float)) and current_price > 0:
                     delta_pct = ((pre_price - current_price) / current_price) * 100.0
                     pct_str = f" ({delta_pct:+.2f}%)"
                 else:
                     pct_str = ""
-                extended_hours_context = f"Pre-Market: {pre_price:.2f} {currency}{pct_str}"
+                extended_hours_context = f"Pre-Market: {pre_price:,.2f} {currency}{pct_str}"
 
             # Universal Fiscal Year End detection (from SEC/Yahoo lastFiscalYearEnd timestamp)
             fy_end_month = KNOWN_FISCAL_YEAR_ENDS.get(resolved_ticker, 12)
@@ -513,18 +513,18 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                         "exchange": info.get("exchange", "Stock Exchange"),
                         "sector": info.get("sector") or "Technology & Services",
                         "industry": info.get("industry") or "IT Services & Consulting",
-                        "current_price": f"{current_price:.2f} {currency}" if current_price else "N/A",
+                        "current_price": f"{current_price:,.2f} {currency}" if current_price else "N/A",
                         "extended_hours_context": extended_hours_context,
                         "ttm_cutoff_label": ttm_cutoff_label,
                         "market_cap": format_number(market_cap, currency=currency),
-                        "pe_ratio": f"{pe_ratio:.2f}" if pe_ratio else "N/A",
-                        "trailing_pe": f"{trailing_pe:.2f}" if trailing_pe else "N/A",
-                        "forward_pe": f"{forward_pe:.2f}" if forward_pe else "N/A",
+                        "pe_ratio": f"{pe_ratio:,.2f}" if pe_ratio else "N/A",
+                        "trailing_pe": f"{trailing_pe:,.2f}" if trailing_pe else "N/A",
+                        "forward_pe": f"{forward_pe:,.2f}" if forward_pe else "N/A",
                         "peg_ratio": f"{peg_ratio:.2f}" if peg_ratio else "N/A",
                         "price_to_sales": f"{price_to_sales:.2f}" if price_to_sales else "N/A",
                         "enterprise_to_ebitda": f"{enterprise_to_ebitda:.2f}" if enterprise_to_ebitda else "N/A",
-                        "52_week_high": f"{fifty_two_week_high:.2f} {currency}" if fifty_two_week_high else "N/A",
-                        "52_week_low": f"{fifty_two_week_low:.2f} {currency}" if fifty_two_week_low else "N/A",
+                        "52_week_high": f"{fifty_two_week_high:,.2f} {currency}" if fifty_two_week_high else "N/A",
+                        "52_week_low": f"{fifty_two_week_low:,.2f} {currency}" if fifty_two_week_low else "N/A",
                         "total_revenue": format_number(total_revenue, currency=currency),
                         "revenue_scale_descriptor": get_revenue_scale_descriptor(total_revenue),
                         "peg_rationale": get_peg_rationale(peg_ratio, forward_pe),
@@ -532,7 +532,7 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                         "operating_margins": op_pct,
                         "profit_margins": margin_pct,
                         "revenue_growth_yoy": growth_pct,
-                        "analyst_target_price": f"{target_mean_price:.2f} {currency}" if target_mean_price else "N/A",
+                        "analyst_target_price": f"{target_mean_price:,.2f} {currency}" if target_mean_price else "N/A",
                         "analyst_rating": recommendation.upper() if recommendation else "N/A",
                         "fiscal_calendar": fiscal_calendar,
                         "sec_officers": sec_officers

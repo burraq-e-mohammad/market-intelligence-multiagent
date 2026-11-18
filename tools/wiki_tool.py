@@ -179,6 +179,33 @@ VERIFIED_CORPORATE_REGISTRY = {
                 "Compliance with State Bank of Pakistan foreign remittance and export regulatory frameworks."
             ]
         }
+    },
+    "samsung electronics": {
+        "company": "Samsung Electronics Co., Ltd.",
+        "url": "https://en.wikipedia.org/wiki/Samsung_Electronics",
+        "summary": "Samsung Electronics Co., Ltd. is a South Korean multinational major appliance and consumer electronics corporation headquartered in Yeongtong-gu, Suwon, South Korea. It is the world's largest producer of memory semiconductors and smartphones, operating as a standalone publicly traded flagship of the broader Samsung Group.",
+        "entity_profile": {
+            "founding_info": "Founded in 1969 in Suwon, South Korea as an electronics flagship (separate listed entity from Samsung Group sister affiliates)",
+            "verified_leadership": [
+                "Lee Jae-yong (Executive Chairman)",
+                "Jun Young-hyun (Vice Chairman & Head of DS Division)"
+            ],
+            "breaking_governance": [
+                "Corporate strategy led by Executive Chairman Lee Jae-yong and Device Solutions head Jun Young-hyun."
+            ],
+            "verified_acquisitions": [
+                "Harman International Industries (closed 2017, $8B)"
+            ],
+            "verified_segments": [
+                "Device Solutions (DS: Memory/HBM/DRAM/NAND, Foundry, System LSI)",
+                "Device eXperience (DX: Mobile eXperience/Galaxy, Visual Display, Digital Appliances, Networks)",
+                "Samsung Display (SDC: OLED & QD-OLED Display Panels)",
+                "Harman (Connected Automotive Systems & Audio Technologies)"
+            ],
+            "breaking_regulatory": [
+                "Global semiconductor export-control compliance (US-China chip restrictions) and South Korean Fair Trade Commission (KFTC) oversight."
+            ]
+        }
     }
 }
 
@@ -246,15 +273,26 @@ def is_valid_wiki_match(company_name: str, wiki_title: str) -> bool:
 
     return False
 
+def _strip_legal_suffixes(name: str) -> str:
+    """Strip international corporate legal suffixes (Co., Ltd., Inc., Corp., PLC, S.A., N.V., AG, GmbH, etc.)."""
+    cleaned = re.sub(
+        r',?\s*\b(?:Co\.?,?\s*Ltd\.?|Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|PLC|S\.A\.|N\.V\.|AG|GmbH|SE|LLC|PBC|Holdings)\b\.?',
+        '', name, flags=re.IGNORECASE
+    )
+    return " ".join(cleaned.strip(" ,.").split())
+
 def search_wikipedia_titles(company_name: str) -> List[str]:
     """
     Query Wikipedia's OpenSearch API to find the exact canonical page title.
-    Handles differences in capitalization, punctuation, and suffixes (e.g. NETSOL -> NetSol Technologies).
+    Handles international legal forms (e.g. 'Samsung Electronics Co., Ltd.' -> 'Samsung Electronics').
     """
-    queries = [company_name]
-    clean = company_name.replace("Inc.", "").replace("Inc", "").replace("Corporation", "").replace("Ltd", "").replace("Limited", "").replace("Technologies", "Technologies").strip()
-    if clean and clean != company_name:
+    clean = _strip_legal_suffixes(company_name)
+    queries = []
+    if clean:
         queries.append(clean)
+    if company_name not in queries:
+        queries.append(company_name)
+    if clean:
         queries.append(f"{clean} company")
         
     candidates = []
@@ -777,12 +815,13 @@ def get_company_biography(company_name: str) -> Dict[str, Any]:
     # 1. Search Wikipedia OpenSearch for exact canonical titles
     opensearch_candidates = search_wikipedia_titles(company_name)
     
-    fallback_candidates = [
+    stripped_name = _strip_legal_suffixes(company_name)
+    fallback_candidates = list(dict.fromkeys([
+        stripped_name,
         company_name,
-        f"{company_name} (company)",
-        company_name.replace(" Inc.", "").replace(" Ltd", "").strip(),
-        f"{company_name} Corporation"
-    ]
+        f"{stripped_name} (company)",
+        f"{stripped_name} Corporation"
+    ]))
     
     all_candidates = opensearch_candidates + [c for c in fallback_candidates if c not in opensearch_candidates]
     

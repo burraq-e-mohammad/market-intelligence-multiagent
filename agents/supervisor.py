@@ -63,20 +63,19 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         emit("Research Supervisor", "Parent Director", "started", f"Initiating deep investigation project for '{clean_target}'...")
         print(f"\n[Parent Agent: {self.name}] Initiating research project for '{clean_target}'...")
 
-        # Step 1: Resolve Entity Classification, Financial State & Corporate Profile concurrently
-        # Pre-populating governance & regulatory facts into shared_state BEFORE subagents run
-        # guarantees Section 5 (News Scout) never contradicts Sections 2 & 3 on leadership transitions!
-        emit("Research Supervisor", "Parent Director", "resolving", f"Resolving canonical entity classification, financial feed, and corporate profile for '{clean_target}'...")
-        with ThreadPoolExecutor(max_workers=2) as pre_exec:
-            f_pre_fin = pre_exec.submit(get_financial_metrics, clean_target)
-            f_pre_bio = pre_exec.submit(get_company_biography, clean_target)
-            tool_fin = f_pre_fin.result()
-            tool_bio = f_pre_bio.result()
-
+        # Step 1: Resolve Exact Legal Entity Classification & Financial State FIRST,
+        # then resolve Corporate Profile using the exact canonical legal name (e.g. "Samsung Electronics Co., Ltd."
+        # instead of generic "Samsung") so conglomerate subsidiaries never pull parent-chaebol sister companies!
+        emit("Research Supervisor", "Parent Director", "resolving", f"Resolving exact legal entity classification and market feed for '{clean_target}'...")
+        tool_fin = get_financial_metrics(clean_target)
         is_public = tool_fin.get("is_public", False)
         metrics = tool_fin.get("data", {})
         company_name = metrics.get("company_name", clean_target)
         ticker = metrics.get("symbol", "PRIVATE / UNLISTED")
+
+        # Use the resolved official legal name when querying corporate history (prevents conglomerate scope bleed)
+        bio_target = company_name if (is_public and company_name and len(company_name) > len(clean_target)) else clean_target
+        tool_bio = get_company_biography(bio_target)
 
         pre_profile = tool_bio.get("entity_profile", {})
         pre_breaking_gov = pre_profile.get("breaking_governance", [])
@@ -154,7 +153,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         with ThreadPoolExecutor(max_workers=3) as executor:
             f_fin = executor.submit(self.financial_agent.analyze, clean_target, shared_state)
             f_news = executor.submit(self.news_agent.analyze, clean_target, ticker, shared_state)
-            f_bio = executor.submit(self.biography_agent.analyze, clean_target, shared_state)
+            f_bio = executor.submit(self.biography_agent.analyze, bio_target, shared_state)
             
             futures_map = {
                 f_fin: ("Financial Analyst Agent", "Financial Analyst"),

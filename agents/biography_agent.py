@@ -59,7 +59,7 @@ CRITICAL UNIVERSAL DIRECTIVES:
    - Strictly cite documented acquisition closing dates and deal values from the verified intelligence above.
    - Reflect current executive leadership and any breaking leadership transitions. Do NOT invent unverified titles (e.g. never state a COO was appointed if not in the verified record).
 2. Section 2 (Core Business Divisions, Solutions & Ecosystem):
-   - Align divisions strictly with the enterprise's verified products and reporting segments above. Never invent unrelated business divisions (e.g. do not invent consulting units for hardware or software product companies).
+   - Align divisions strictly with the exact target entity's ({company_name}) verified products and reporting segments above. Never invent unrelated business divisions, and if the company belongs to a wider conglomerate/chaebol, NEVER list separately listed sister affiliates (e.g., separate insurance, shipbuilding, or biopharma affiliates) as internal operating divisions of {company_name}.
 3. Section 3 (Competitive Moat & Strategic Industry Positioning):
    - Analyze architectural moats, proprietary ecosystems, intellectual property, and customer retention dynamics.
 4. NEGATIVE DIRECTIVE: NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt' in your output.
