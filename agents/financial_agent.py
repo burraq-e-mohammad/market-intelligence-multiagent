@@ -112,9 +112,10 @@ DOCUMENTED PRIVATE-MARKET INTELLIGENCE & DISCLOSURES:
 
 STRICT PRIVATE-ENTITY GUARDRAILS:
 1. ZERO PUBLIC-EQUITY BOILERPLATE: This is a PRIVATE company with NO public stock price, NO Forward P/E, NO Trailing P/E, and NO PEG ratio. Under NO circumstances include paragraphs discussing Forward P/E or PEG ratio formulas!
-2. EXACT NUMERIC SCALE DISCIPLINE: Never call a $10B-$99B revenue figure 'triple-digit billion' (only $100B+ is triple-digit billion; $10B-$99.9B is double-digit billion; $1B-$9.9B is multi-billion). Distinguish clearly between recognized historical revenue and annualized revenue run rate (ARR).
-3. CONCRETE PRIVATE FIGURES: Explicitly incorporate any verified post-money valuations, funding round sizes, anchor investors, ARR figures, and IPO/restructuring details documented above.
-4. FORMATTING: Write currency cleanly ($852 billion, NEVER \\$852 billion). Never use LaTeX $...$ around words or ratios. Never use meta words like 'canonical', 'provided', or 'prompt'.
+2. EXACT NUMERIC SCALE DISCIPLINE: Never call $1B 'multi-billion' (only $2B-$9.9B is multi-billion; $10B-$99.9B is double-digit billion; ONLY $100B+ is triple-digit billion). Always lead with the MOST RECENT 2025-2026 valuation and ARR figures rather than outdated 2023 figures.
+3. STRICT CHRONOLOGICAL ORDER: Present corporate restructuring, governance proposals, and IPO timelines in strict chronological order (e.g., earlier proposals -> completed restructuring -> current 2026 structure -> future IPO roadmap; never introduce an earlier year's proposal after describing a completed later restructuring).
+4. CONCRETE PRIVATE FIGURES: Explicitly incorporate any verified post-money valuations, funding round sizes, anchor investors, ARR figures, and IPO/restructuring details documented above.
+5. FORMATTING: Write currency cleanly ($852 billion, NEVER \\$852 billion). Never use LaTeX $...$ around words or ratios. Never use meta words like 'canonical', 'provided', or 'prompt'.
 
 Provide an in-depth 3-section evaluation:
 ### 1. Private Capital Structure, Post-Money Valuation & Funding Rounds

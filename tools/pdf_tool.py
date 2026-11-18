@@ -128,7 +128,9 @@ class IntelligenceReportPDF(FPDF):
         super().__init__()
         self.company_name = sanitize_text(company_name)
         self.ticker = sanitize_text(ticker)
-        self.set_auto_page_break(auto=True, margin=15)
+        # Top margin 28mm clears the 22mm header banner; bottom margin 20mm clears the -15mm footer cleanly
+        self.set_margins(left=10, top=28, right=10)
+        self.set_auto_page_break(auto=True, margin=20)
 
     def header(self):
         # Header banner
@@ -144,13 +146,14 @@ class IntelligenceReportPDF(FPDF):
         else:
             label += " [PRIVATE ENTERPRISE]"
             
-        self.cell(0, 10, label, new_x=XPos.RIGHT, new_y=YPos.TOP)
+        self.cell(135, 10, label[:72], new_x=XPos.RIGHT, new_y=YPos.TOP)
         
         self.set_font("Helvetica", "", 9)
         self.set_text_color(203, 213, 225)
         self.set_xy(150, 6)
         self.cell(50, 10, datetime.now().strftime("%B %d, %Y"), align="R")
-        self.ln(20)
+        # Reset cursor cleanly to top-left body margin so automatic page breaks mid-paragraph never collide
+        self.set_xy(self.l_margin, self.t_margin)
 
     def footer(self):
         self.set_y(-15)
@@ -159,18 +162,25 @@ class IntelligenceReportPDF(FPDF):
         self.cell(0, 10, f"Autonomous Multi-Agent Intelligence System | Page {self.page_no()}", align="C")
 
     def section_title(self, title: str):
+        # Widow/orphan guard: move to next page if insufficient space below heading
+        if self.get_y() > self.page_break_trigger - 24:
+            self.add_page()
         self.ln(4)
+        self.set_x(self.l_margin)
         self.set_font("Helvetica", "B", 13)
         self.set_text_color(15, 23, 42) # Dark slate
         self.multi_cell(0, 7.5, sanitize_text(title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         # Accent underline
         self.set_draw_color(59, 130, 246) # Blue
         self.set_line_width(0.7)
-        self.line(self.get_x(), self.get_y(), self.get_x() + 190, self.get_y())
+        self.line(self.l_margin, self.get_y(), self.l_margin + 190, self.get_y())
         self.ln(3)
 
     def sub_section_title(self, title: str):
+        if self.get_y() > self.page_break_trigger - 18:
+            self.add_page()
         self.ln(2)
+        self.set_x(self.l_margin)
         self.set_font("Helvetica", "B", 10.5)
         self.set_text_color(30, 58, 138) # Deep navy blue
         clean_title = sanitize_text(title.replace("#", "").strip())
@@ -189,7 +199,16 @@ class IntelligenceReportPDF(FPDF):
                 self.set_font("Helvetica", "", 9.5)
                 self.set_text_color(51, 65, 85) # Slate text
                 clean_text = sanitize_text(line)
-                self.multi_cell(0, 5, clean_text)
+                # Page-break-inside: avoid for short/medium paragraphs (<= 6 wrapped lines) to prevent awkward splits/overlaps
+                try:
+                    wrapped = self.multi_cell(0, 5, clean_text, dry_run=True, output="LINES")
+                    needed_h = len(wrapped) * 5 + 2
+                    if len(wrapped) <= 6 and (self.get_y() + needed_h > self.page_break_trigger):
+                        self.add_page()
+                except Exception:
+                    pass
+                self.set_x(self.l_margin)
+                self.multi_cell(0, 5, clean_text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(1)
 
 def generate_pdf_report(

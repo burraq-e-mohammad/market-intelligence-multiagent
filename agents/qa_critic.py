@@ -235,14 +235,23 @@ class QualityAssuranceAgent:
                         return sent
                     elif max_b >= 10.0:
                         return re.sub(r'\btriple-digit\s+billion(?:-dollar)?(?:\s+revenue)?\s+scale\b', 'double-digit billion-dollar revenue scale', sent, flags=re.IGNORECASE)
-                    else:
+                    elif max_b >= 2.0:
                         return re.sub(r'\btriple-digit\s+billion(?:-dollar)?(?:\s+revenue)?\s+scale\b', 'multi-billion-dollar revenue scale', sent, flags=re.IGNORECASE)
+                    else:
+                        return re.sub(r'\btriple-digit\s+billion(?:-dollar)?(?:\s+revenue)?\s+scale\b', 'billion-dollar revenue scale', sent, flags=re.IGNORECASE)
                 # No $100B+ figure present and entity isn't verified triple-digit scale -> neutralize leaked template phrase
-                sent = re.sub(r'\btriple-digit\s+billion(?:-dollar)?\s+revenue\s+scale\b', 'multi-billion-dollar commercial revenue scale', sent, flags=re.IGNORECASE)
-                sent = re.sub(r'\btriple-digit\s+billion(?:-dollar)?\s+revenue\b', 'multi-billion-dollar commercial revenue', sent, flags=re.IGNORECASE)
+                sent = re.sub(r'\btriple-digit\s+billion(?:-dollar)?\s+revenue\s+scale\b', 'commercial revenue scale', sent, flags=re.IGNORECASE)
+                sent = re.sub(r'\btriple-digit\s+billion(?:-dollar)?\s+revenue\b', 'commercial-scale revenue', sent, flags=re.IGNORECASE)
                 return sent
 
             text = re.sub(r'(?:[^\n\.]|\.(?=[0-9]))*\btriple-digit\s+billion(?:[^\n\.]|\.(?=[0-9]))*\.?', _fix_scale_sentence, text, flags=re.IGNORECASE)
+
+        # D1b. Prevent "multi-billion ... of $1 billion" ($1B is singular, not multi-billion!)
+        text = re.sub(
+            r'\bmulti-billion(?:-dollar)?(\s+(?:annualized\s+)?(?:revenue|ARR|run\s+rate)[^\.\n]{0,30}?\bof\s+\$1(?:\.0+)?\s*(?:billion|B))\b',
+            r'billion-dollar\1',
+            text, flags=re.IGNORECASE
+        )
 
         # D2. Private-Company Guard: Strip ONLY leaked public-equity Forward P/E & PEG Ratio boilerplate sentences
         if not is_public:
