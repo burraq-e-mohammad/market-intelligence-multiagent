@@ -24,6 +24,8 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit|operatorname)\{([^\}]*)\}', r'\1', text)
     text = text.replace("\\times", "x").replace("\\approx", "~")
     text = re.sub(r'\bJenson\b', 'Jensen', text)
+    text = re.sub(r'\bOpenAl\b', 'OpenAI', text)
+    text = re.sub(r'\bChief\s+Scientist\s+Officer\b', 'Chief Scientist', text, flags=re.IGNORECASE)
     # Fix erratic mid-sentence capitalization after common adverbs (e.g. "heavily Fixated" -> "heavily fixated")
     text = re.sub(
         r'\b(heavily|strongly|deeply|closely|largely|widely|rapidly|sharply|primarily|increasingly|remains|remain)\s+'

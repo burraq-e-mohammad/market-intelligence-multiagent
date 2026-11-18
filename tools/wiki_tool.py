@@ -514,12 +514,99 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
         if len(sec_title) < 40 and sec_title not in segments:
             segments.append(sec_title)
 
+    # 5. Extract Private-Enterprise Valuation, Funding Rounds, ARR & Burn Excerpts (for private/unlisted firms)
+    private_financials = extract_private_financial_profile(text)
+
     return {
         "founding_info": founding_info,
         "active_officers": [o.model_dump() for o in reconciled_officers],
         "verified_leadership": leadership[:6],
         "verified_acquisitions": acquisitions[:6],
-        "verified_segments": segments[:6]
+        "verified_segments": segments[:6],
+        "private_financials": private_financials
+    }
+
+def extract_private_financial_profile(text: str) -> Dict[str, Any]:
+    """
+    Universal Private-Enterprise Financial Extractor (works for ANY unlisted firm: OpenAI, Stripe, SpaceX, Anthropic, Databricks, etc.).
+    Dynamically pulls verified post-money valuations, funding rounds, ARR / revenue run rate, cash burn,
+    and IPO / corporate structure excerpts from Wikipedia & disclosures so Section 4 has concrete private-market figures.
+    """
+    if not text:
+        return {}
+
+    sentences = re.split(r'(?<=[\.\!\?])\s+', text)
+    valuations: List[str] = []
+    funding_rounds: List[str] = []
+    revenue_and_arr: List[str] = []
+    burn_and_ipo: List[str] = []
+
+    val_pat = re.compile(
+        r'(?:\bvalu(?:ed|ation)\s+(?:at|of)\b|\b(?:post[- ]money|pre[- ]money)\s+valuation\b|\$[0-9\.,]+\s*(?:trillion|billion|million|T|B|M)\s+(?:post[- ]money\s+|pre[- ]money\s+)?valuation\b)',
+        re.IGNORECASE
+    )
+    fund_pat = re.compile(r'\b(raised|funding\s+round|investment\s+of|series\s+[a-z]|capital\s+raise|anchored\s+by|led\s+by)\b.*\$[0-9]|\$[0-9][^\.\n]{0,30}\b(funding\s+round|round|capital\s+raise)\b', re.IGNORECASE)
+    rev_pat = re.compile(r'\b(annualized\s+revenue|run\s+rate|\bARR\b|revenue\s+(?:of|reached|hit|grew|exceeded|was)|recognized\s+revenue)\b.*\$[0-9]|\$[0-9][^\.\n]{0,30}\b(in\s+(?:annual\s+)?revenue|ARR|run\s+rate)\b', re.IGNORECASE)
+    ipo_pat = re.compile(r'\b(cash\s+burn|net\s+loss|operating\s+loss|profitab(?:le|ility)|IPO|initial\s+public\s+offering|public\s+benefit\s+corporation|PBC)\b', re.IGNORECASE)
+
+    for s in sentences:
+        s_clean = " ".join(s.split()).strip()
+        if len(s_clean) < 25 or len(s_clean) > 360:
+            continue
+        if val_pat.search(s_clean) and "$" in s_clean and len(valuations) < 5:
+            valuations.append(s_clean)
+        if fund_pat.search(s_clean) and len(funding_rounds) < 5:
+            funding_rounds.append(s_clean)
+        if rev_pat.search(s_clean) and len(revenue_and_arr) < 5:
+            revenue_and_arr.append(s_clean)
+        if ipo_pat.search(s_clean) and len(burn_and_ipo) < 4:
+            burn_and_ipo.append(s_clean)
+
+    amt = r'(\$[0-9\.,]+\s*(?:trillion|billion|million|T|B|M))'
+    # Extract the specific dollar figure bound to valuation (NOT the funding round figure in the same sentence)
+    latest_val_match = None
+    for v in reversed(valuations):
+        m = (
+            re.search(rf'{amt}\s+(?:post[- ]money\s+|pre[- ]money\s+)?valuation\b', v, re.IGNORECASE)
+            or re.search(rf'\bvalu(?:ed|ation)\s+(?:at|of)\s+(?:over\s+|roughly\s+|about\s+|approximately\s+)?{amt}', v, re.IGNORECASE)
+        )
+        if m:
+            latest_val_match = m.group(1)
+            break
+
+    # Extract the specific dollar figure bound to funding/round
+    latest_fund_match = None
+    for f in reversed(funding_rounds):
+        m = (
+            re.search(rf'{amt}\s+(?:funding\s+round|round|investment|capital\s+raise)\b', f, re.IGNORECASE)
+            or re.search(rf'\b(?:raised|investment\s+of)\s+(?:over\s+|roughly\s+|about\s+)?{amt}', f, re.IGNORECASE)
+            or re.search(amt, f, re.IGNORECASE)
+        )
+        if m:
+            latest_fund_match = m.group(1)
+            break
+
+    # Extract the specific dollar figure bound to ARR / latest revenue
+    latest_rev_match = None
+    for r_s in reversed(revenue_and_arr):
+        m = (
+            re.search(rf'\b(?:ARR|run\s+rate)\s+(?:hit|reached|of|exceeded|topped|surpassed)?\s*(?:~|approx\.?\s*)?{amt}', r_s, re.IGNORECASE)
+            or re.search(rf'{amt}\s+(?:ARR|annualized\s+revenue|run\s+rate)\b', r_s, re.IGNORECASE)
+            or re.search(rf'\brevenue\s+(?:of|reached|hit|exceeded|was)\s+{amt}', r_s, re.IGNORECASE)
+            or re.search(amt, r_s, re.IGNORECASE)
+        )
+        if m:
+            latest_rev_match = m.group(1)
+            break
+
+    return {
+        "latest_valuation_headline": latest_val_match or "Private / Undisclosed",
+        "latest_funding_headline": latest_fund_match or "Private Financing Rounds",
+        "latest_revenue_headline": latest_rev_match or "Private Revenue / ARR",
+        "valuations": valuations,
+        "funding_rounds": funding_rounds,
+        "revenue_and_arr": revenue_and_arr,
+        "burn_and_ipo": burn_and_ipo
     }
 
 def is_corporate_wikipedia_page(page) -> bool:

@@ -128,6 +128,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             "verified_leadership": [o.formatted() for o in pre_reconciled],
             "breaking_governance": pre_breaking_gov,
             "breaking_regulatory": pre_breaking_reg,
+            "private_financials": pre_profile.get("private_financials", {}),
             "bio_tool_result": tool_bio,
             "temporal_year": 2026
         }
@@ -230,17 +231,43 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         recent_q = fiscal_cal.get("most_recent_reported_quarter", "")
         sentiment_tone = sentiment_pulse.get("tone", "Balanced / Observant")
         sentiment_rationale = sentiment_pulse.get("rationale", "")
+        pf = shared_state.get("private_financials") or {}
 
-        synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Public Entity: {is_public}).
-
-VERIFIED STATE (SINGLE SOURCE OF TRUTH):
+        if is_public:
+            verified_state_block = f"""VERIFIED PUBLIC-EQUITY STATE (SINGLE SOURCE OF TRUTH):
 - Company: {company_name} ({ticker}) | Exchange: {metrics.get('exchange', 'Stock Exchange')}
 - Current Stock Price: {metrics.get('current_price', 'N/A')}
+- Extended-Hours Context: {metrics.get('extended_hours_context', 'Regular session close')}
 - Market Capitalization: {metrics.get('market_cap', 'N/A')}
 - Trailing P/E: {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))} | Forward P/E: {metrics.get('forward_pe', 'N/A')} | PEG Ratio: {metrics.get('peg_ratio', 'N/A')}
 - TTM Revenue (Trailing 12 Months): {metrics.get('total_revenue', 'N/A')} ({scale_desc}; do NOT confuse with annual FY filings)
 - Operating Margin: {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))} | Profit Margin: {metrics.get('profit_margins', 'N/A')}
-- Fiscal Calendar Grounding: {fiscal_summary}
+- PEG Valuation Rationale: {peg_context}
+- Fiscal Calendar Grounding: {fiscal_summary}"""
+            entity_fin_rule = (
+                "1. PUBLIC EQUITY ACCURACY: Under NO circumstances state or quote a regular-session share price, multiple, or market cap that contradicts the Verified State above. "
+                "If extended-hours trading or fresh post-earnings actuals appear in Subagent 2 (News & Events), explicitly highlight those concrete figures (revenue, EPS, guidance, after-hours move) and note that market-data TTM feeds roll forward over 24-72 hours."
+            )
+        else:
+            pf_vals = " | ".join(pf.get("valuations", [])) or "Private institutional financing rounds"
+            pf_funds = " | ".join(pf.get("funding_rounds", [])) or "Venture & strategic private capital"
+            pf_revs = " | ".join(pf.get("revenue_and_arr", [])) or "Private ARR / contract revenue disclosures"
+            pf_ipo = " | ".join(pf.get("burn_and_ipo", [])) or "Unlisted private corporate structure"
+            verified_state_block = f"""VERIFIED PRIVATE-ENTERPRISE STATE (UNLISTED ENTITY):
+- Company: {company_name} | Status: PRIVATELY HELD / UNLISTED (Exempt from SEC Form 10-K)
+- Latest Post-Money Valuation Context: {pf_vals}
+- Documented Capital Raises & Backers: {pf_funds}
+- Documented Revenue & ARR Trajectory: {pf_revs}
+- Cash Burn, Restructuring & IPO Roadmap: {pf_ipo}"""
+            entity_fin_rule = (
+                "1. STRICT PRIVATE-ENTITY ROUTING: This is a PRIVATELY HELD enterprise with NO public stock ticker, NO Forward P/E, and NO PEG ratio. "
+                "NEVER output public-equity P/E or PEG ratio boilerplate, and NEVER describe revenue under $100B as 'triple-digit billion' "
+                "($10B-$99.9B is double-digit billion; $1B-$9.9B is multi-billion). Highlight documented post-money valuations, funding rounds, ARR run rate, and IPO timeline."
+            )
+
+        synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Public Entity: {is_public}).
+
+{verified_state_block}
 
 DYNAMIC CORPORATE PROFILE & REAL-TIME CATALYSTS:
 - Founding & Origins: {founding_info if founding_info else 'Documented corporate founding'}
@@ -250,22 +277,21 @@ DYNAMIC CORPORATE PROFILE & REAL-TIME CATALYSTS:
 - Official Reporting Segments & Products: {", ".join(verified_segments) if verified_segments else 'Documented core operating divisions'}
 - Documented Strategic Acquisitions: {"; ".join(verified_acquisitions) if verified_acquisitions else 'Documented M&A filings'}
 - Verified Media & Market Sentiment Pulse: {sentiment_tone} ({sentiment_rationale})
-- PEG Valuation Rationale: {peg_context}
 
 UNIVERSAL FACTUAL & CONTRADICTION PREVENTION DIRECTIVES:
-1. Under NO circumstances state or quote a regular-session share price, multiple, or market cap that contradicts the Verified State above. If extended-hours trading or fresh post-earnings actuals appear in Subagent 2 (News & Events), explicitly highlight those concrete figures (revenue, EPS, guidance, after-hours move) and note that market-data TTM feeds roll forward over 24-72 hours.
+{entity_fin_rule}
 2. STRICT ROLE-BINDING: Name ONLY the Verified Active Leadership & Officers above. NEVER attribute the CEO title to executives of unrelated companies or former/resigned officers, and never invent an undocumented COO.
-3. FISCAL QUARTER GROUNDING: Strictly use the company's fiscal quarter labels (most recent reported quarter: {recent_q if recent_q else 'latest fiscal period'}). Never confuse calendar quarters with non-calendar fiscal quarters.
+3. FISCAL QUARTER GROUNDING: Strictly use accurate calendar/fiscal periods ({recent_q if (is_public and recent_q) else 'current 2026 operating period'}).
 4. SENTIMENT COHESION: Section 1 (Executive Summary) MUST match the Verified Media & Market Sentiment Pulse ({sentiment_tone}). NEVER describe sentiment as 'constructive' or 'bullish' if the verified media pulse is bearish, cautious, or mixed!
 5. Business Architecture: Structure divisions strictly around the company's verified reporting units and products above.
 6. Strategic Risks: Explicitly evaluate any breaking regulatory investigations, compliance scrutiny, or trade inquiries identified above.
-7. FORMATTING & NEGATIVE CONSTRAINT: NEVER escape dollar signs with backslashes (write $3.75T, NEVER \\$3.75T). NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around text or ratios (write P/E and 9.72x in plain text). NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt'. Never repeat phrases like 'With a PEG ratio of X, PEG ratio of X'.
+7. FORMATTING & NEGATIVE CONSTRAINT: NEVER escape dollar signs with backslashes (write $852 billion or $3.75T, NEVER \\$852 billion). NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around text or ratios. NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt'.
 8. Do NOT leave any dangling headers or unfinished sentences.
 
 Section 1: EXECUTIVE_SUMMARY
 - Macro Enterprise Standing & Industry Positioning
 - Core Commercial Drivers & Operational Scale
-- Financial & Valuation Synthesis
+- Financial & Valuation Synthesis ({'Public Equity Multiples' if is_public else 'Private Valuation, Funding & ARR'})
 - Sentiment & Event Integration (Aligned with {sentiment_tone})
 
 Section 2: STRATEGIC_OUTLOOK

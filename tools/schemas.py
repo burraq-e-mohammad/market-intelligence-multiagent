@@ -38,6 +38,14 @@ class VerifiedOfficer(BaseModel):
             raise ValueError(f"Non-person token in officer name: '{cleaned}'")
         return cleaned
 
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, v: str) -> str:
+        t = " ".join(v.strip().split())
+        t = re.sub(r'\bChief\s+Scientist\s+Officer\b', 'Chief Scientist', t, flags=re.IGNORECASE)
+        t = re.sub(r'\bOfficer\s+Officer\b', 'Officer', t, flags=re.IGNORECASE)
+        return t
+
     def formatted(self) -> str:
         return f"{self.name} ({self.title})"
 

@@ -123,9 +123,11 @@ class QualityAssuranceAgent:
         verified_segments = shared_state.get("verified_segments", [])
         fiscal_cal = shared_state.get("fiscal_calendar") or metrics.get("fiscal_calendar") or {}
 
-        # A. Common Executive Name & Erratic Capitalization Typo Corrections (Generic)
+        # A. Common Executive Name, Redundant Title, Glyph & Erratic Capitalization Corrections (Generic)
         text = re.sub(r'\bJenson\s+Huang\b', 'Jensen Huang', text)
         text = re.sub(r'\bJenson\b', 'Jensen', text)
+        text = re.sub(r'\bOpenAl\b', 'OpenAI', text)
+        text = re.sub(r'\bChief\s+Scientist\s+Officer\b', 'Chief Scientist', text, flags=re.IGNORECASE)
         # Fix erratic mid-sentence capitalization after common adverbs (e.g. "heavily Fixated" -> "heavily fixated")
         text = re.sub(
             r'\b(heavily|strongly|deeply|closely|largely|widely|rapidly|sharply|primarily|increasingly|remains|remain)\s+'
@@ -216,9 +218,46 @@ class QualityAssuranceAgent:
         text = re.sub(r'\bcanonical\s+state\b', 'market state', text, flags=re.IGNORECASE)
         text = re.sub(r'\bcanonical\b', 'verified', text, flags=re.IGNORECASE)
 
-        # D. Dynamic Revenue Scale Correction based on mathematical scale descriptor
-        if "triple-digit" in scale_desc.lower() or "hundred-billion" in scale_desc.lower():
+        # D. Universal Numeric-Scale Consistency & Private vs. Public Boilerplate Guard
+        is_public = shared_state.get("is_public", True)
+        if is_public and ("triple-digit" in scale_desc.lower() or "hundred-billion" in scale_desc.lower()):
             text = re.sub(r'\bdouble-digit\s+scale\b', 'triple-digit billion-dollar scale', text, flags=re.IGNORECASE)
+        else:
+            # Guard against leaked "triple-digit billion" wording when the entity does NOT have $100B+ revenue
+            # Inspect every sentence mentioning "triple-digit billion" and align to actual cited magnitude
+            def _fix_scale_sentence(match):
+                sent = match.group(0)
+                # Check if any revenue dollar figure >= $100B appears in this sentence
+                nums = re.findall(r'\$([0-9]+(?:\.[0-9]+)?)\s*(?:billion|B)\b', sent, re.IGNORECASE)
+                if nums:
+                    max_b = max(float(n) for n in nums)
+                    if max_b >= 100.0:
+                        return sent
+                    elif max_b >= 10.0:
+                        return re.sub(r'\btriple-digit\s+billion(?:-dollar)?(?:\s+revenue)?\s+scale\b', 'double-digit billion-dollar revenue scale', sent, flags=re.IGNORECASE)
+                    else:
+                        return re.sub(r'\btriple-digit\s+billion(?:-dollar)?(?:\s+revenue)?\s+scale\b', 'multi-billion-dollar revenue scale', sent, flags=re.IGNORECASE)
+                # No $100B+ figure present and entity isn't verified triple-digit scale -> neutralize leaked template phrase
+                sent = re.sub(r'\btriple-digit\s+billion(?:-dollar)?\s+revenue\s+scale\b', 'multi-billion-dollar commercial revenue scale', sent, flags=re.IGNORECASE)
+                sent = re.sub(r'\btriple-digit\s+billion(?:-dollar)?\s+revenue\b', 'multi-billion-dollar commercial revenue', sent, flags=re.IGNORECASE)
+                return sent
+
+            text = re.sub(r'(?:[^\n\.]|\.(?=[0-9]))*\btriple-digit\s+billion(?:[^\n\.]|\.(?=[0-9]))*\.?', _fix_scale_sentence, text, flags=re.IGNORECASE)
+
+        # D2. Private-Company Guard: Strip ONLY leaked public-equity Forward P/E & PEG Ratio boilerplate sentences
+        if not is_public:
+            text = re.sub(
+                r'(?:###\s*)?Forward\s+P/E\s*&\s*PEG\s+Ratio\s+Alignment\s*:?\s*(?:The\s+PEG\s+ratio[^\.\n]*\.\s*)?',
+                '', text, flags=re.IGNORECASE
+            )
+            text = re.sub(
+                r'The\s+PEG\s+ratio\s+is\s+(?:strictly\s+|mathematically\s+)?defined[^\.\n]*\.\s*',
+                '', text, flags=re.IGNORECASE
+            )
+            text = re.sub(
+                r'Reverse-engineering\s+the\s+PEG\s+ratio[^\.\n]*\.\s*',
+                '', text, flags=re.IGNORECASE
+            )
 
         # E. Dynamic Leadership Governance Sanitization
         # If verified leadership does NOT contain a COO, strip generic hallucinated COO phrases

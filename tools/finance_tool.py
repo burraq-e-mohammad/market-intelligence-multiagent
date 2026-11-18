@@ -562,19 +562,25 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
         }
     }
 
-def generate_deterministic_financial_table(data: Dict[str, Any]) -> str:
+def generate_deterministic_financial_table(data: Dict[str, Any], private_financials: Optional[Dict[str, Any]] = None) -> str:
     """
     Generate mathematically verified, locked Markdown tables directly from deterministic market data.
-    Eliminates LLM arithmetic hallucinations and broken segment math.
+    Strictly gates public-equity metrics vs. private-enterprise funding, valuation, and ARR metrics.
     """
     if not data.get("is_public", True) or data.get("symbol") == "PRIVATE / UNLISTED":
-        return f"""### Deterministic Capital Structure Overview (Private Enterprise)
-| Dimension | Corporate Status | Reference Standard | Validation Status |
+        pf = private_financials or data.get("private_financials") or {}
+        val_hl = pf.get("latest_valuation_headline", "Private / Financing Rounds")
+        fund_hl = pf.get("latest_funding_headline", "Private Equity / Venture / Strategic")
+        rev_hl = pf.get("latest_revenue_headline", "Private ARR / Contract Revenue")
+        return f"""### Deterministic Private Capital & Valuation Matrix (Unlisted Enterprise)
+| Dimension | Documented Corporate Profile | Reference Standard | Validation Status |
 | :--- | :--- | :--- | :--- |
-| **Enterprise Standing** | Privately Held Entity | SEC Exemption Regulation | Verified Non-Public |
-| **Exchange Listing** | Unlisted (No Public Ticker) | Secondary / Direct Equity | Verified |
-| **Capital Architecture** | Private Equity / Venture / Retained | Non-SEC 10-K Disclosures | Commercial Audit |
-| **Valuation Metric** | Private Financing Rounds / Contract ARR | Primary Stakeholder Books | Private Basis |
+| **Enterprise Standing** | Privately Held / Unlisted Entity | Exempt from SEC Form 10-K | Verified Non-Public |
+| **Exchange Listing** | Unlisted (No Public Stock Ticker) | Private / Secondary Transactions | Verified |
+| **Latest Reported Valuation** | {val_hl} | Post-Money Private Financing Rounds | Verified Disclosures |
+| **Documented Capital Raises** | {fund_hl} | Venture / Strategic Institutional Backing | Verified Disclosures |
+| **Reported Revenue / ARR** | {rev_hl} | Annualized Run Rate & Private Disclosures | Commercial Disclosures |
+| **Public Multiples (P/E, PEG)** | Not Applicable (Private Entity) | Valued on ARR / Post-Money Rounds | Private Basis |
 """
 
     ext_row = ""
