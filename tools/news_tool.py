@@ -14,10 +14,12 @@ def classify_breaking_events(articles: List[Dict[str, str]]) -> Dict[str, List[s
     governance = []
     regulatory = []
     commercial = []
+    earnings = []
     
     gov_pattern = re.compile(r'\b(resigns?|stepping down|stepped down|appointed|names?|named|replaces?|interim ceo|new ceo|board chair|chairman|succession|exits?|ousted)\b', re.IGNORECASE)
     reg_pattern = re.compile(r'\b(investigation|probe|inquiry|sec|doj|export control|sanctions|subpoena|antitrust|lawsuit|penalty|fine|oversight committee|compliance|scrutiny)\b', re.IGNORECASE)
     comm_pattern = re.compile(r'\b(launches|unveils|next-gen|record revenue|earnings beat|acquisition|partnership|deal|contracts?|breakthrough)\b', re.IGNORECASE)
+    earn_pattern = re.compile(r'\b(earnings|quarterly revenue|eps|guidance|beats? estimates|tops? estimates|after[- ]hours|revenue of \$|q[1-4]\s*(?:fy)?20\d{2})\b', re.IGNORECASE)
 
     for a in articles:
         text = f"{a.get('title', '')} {a.get('snippet', '')}"
@@ -27,11 +29,14 @@ def classify_breaking_events(articles: List[Dict[str, str]]) -> Dict[str, List[s
             regulatory.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")
         if comm_pattern.search(text):
             commercial.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")
+        if earn_pattern.search(text):
+            earnings.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")
 
     return {
-        "governance_events": governance[:3],
-        "regulatory_risks": regulatory[:3],
-        "commercial_milestones": commercial[:3]
+        "governance_events": governance[:4],
+        "regulatory_risks": regulatory[:4],
+        "commercial_milestones": commercial[:4],
+        "earnings_disclosures": earnings[:4]
     }
 
 def compute_sentiment_pulse(articles: List[Dict[str, str]], detected_events: Dict[str, List[str]]) -> Dict[str, str]:
@@ -92,66 +97,82 @@ def compute_sentiment_pulse(articles: List[Dict[str, str]], detected_events: Dic
         "rationale": "Recent headlines reflect steady operational coverage without extreme directional skew."
     }
 
-def get_company_news(company_name: str, symbol: str = "", max_results: int = 5) -> Dict[str, Any]:
-    """
-    Fetch verified breaking news for the exact target company.
-    Uses strict exact phrase quotes and ticker search to prevent matching unrelated companies.
-    """
-    articles: List[Dict[str, str]] = []
-    clean_name = company_name.strip()
-    
-    # 1. Primary: Targeted Google News RSS feed using exact phrase quoting
+def _fetch_google_rss_stream(query_terms: str, clean_name: str, symbol: str, limit: int, existing_titles: set) -> List[Dict[str, str]]:
+    """Helper to query a targeted Google News RSS stream with strict entity relevance filtering."""
+    fetched: List[Dict[str, str]] = []
     try:
-        # Build strict search query
-        query_terms = f'"{clean_name}"'
-        if symbol and symbol != "PRIVATE / UNLISTED":
-            clean_sym = symbol.split(".")[0] # e.g. SYS from SYS.KA
-            query_terms += f' OR "{symbol}"'
-            if len(clean_sym) >= 3:
-                query_terms += f' OR "{clean_sym}"'
-                
         encoded_query = requests.utils.quote(query_terms)
         rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
-        
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(rss_url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            root = ET.fromstring(response.content)
-            for item in root.findall(".//item"):
-                if len(articles) >= max_results:
-                    break
-                title = item.find("title").text if item.find("title") is not None else ""
-                link = item.find("link").text if item.find("link") is not None else ""
-                pub_date = item.find("pubDate").text if item.find("pubDate") is not None else "Recent"
-                source_elem = item.find("source")
-                source_name = source_elem.text if source_elem is not None else "News Source"
-                
-                # Verify that title actually mentions the company name or clean symbol
-                # and reject false prefixes (e.g. reject 'TD Power Systems' if searching 'Systems Limited')
-                title_lower = title.lower()
-                clean_name_lower = clean_name.lower()
-                
-                # Check relevance
-                if clean_name_lower in title_lower or (symbol and symbol.lower() in title_lower):
-                    # Filter out false prefix entities (e.g. 'Concord Enviro Systems Limited' or 'TD Power Systems Limited')
-                    m = re.search(r'([A-Za-z0-9]+)\s+Systems\s+Limited', title, re.IGNORECASE)
-                    if m and clean_name_lower == "systems limited":
-                        prev_word = m.group(1).lower()
-                        if prev_word not in ['the', 'at', 'in', 'of', 'for', 'about', 'and', 'from', 'with', 'to']:
-                            continue
-                            
-                    if title and not any(a["title"] == title for a in articles):
-                        articles.append({
-                            "title": title,
-                            "source": source_name,
-                            "date": pub_date,
-                            "snippet": title,
-                            "url": link
-                        })
+        response = requests.get(rss_url, headers=headers, timeout=8)
+        if response.status_code != 200:
+            return fetched
+        root = ET.fromstring(response.content)
+        clean_name_lower = clean_name.lower()
+        clean_sym = symbol.split(".")[0].lower() if (symbol and symbol != "PRIVATE / UNLISTED") else ""
+
+        for item in root.findall(".//item"):
+            if len(fetched) >= limit:
+                break
+            title = item.find("title").text if item.find("title") is not None else ""
+            link = item.find("link").text if item.find("link") is not None else ""
+            pub_date = item.find("pubDate").text if item.find("pubDate") is not None else "Recent"
+            source_elem = item.find("source")
+            source_name = source_elem.text if source_elem is not None else "News Source"
+            desc_elem = item.find("description")
+            raw_desc = desc_elem.text if desc_elem is not None and desc_elem.text else title
+            clean_desc = re.sub(r'<[^>]+>', ' ', raw_desc)
+            clean_desc = " ".join(clean_desc.split())[:280]
+
+            title_lower = title.lower()
+            if clean_name_lower in title_lower or (clean_sym and len(clean_sym) >= 3 and re.search(rf'\b{re.escape(clean_sym)}\b', title_lower)):
+                m = re.search(r'([A-Za-z0-9]+)\s+Systems\s+Limited', title, re.IGNORECASE)
+                if m and clean_name_lower == "systems limited":
+                    prev_word = m.group(1).lower()
+                    if prev_word not in ['the', 'at', 'in', 'of', 'for', 'about', 'and', 'from', 'with', 'to']:
+                        continue
+                if title and title not in existing_titles:
+                    existing_titles.add(title)
+                    fetched.append({
+                        "title": title,
+                        "source": source_name,
+                        "date": pub_date,
+                        "snippet": clean_desc or title,
+                        "url": link
+                    })
     except Exception:
         pass
+    return fetched
+
+def get_company_news(company_name: str, symbol: str = "", max_results: int = 8) -> Dict[str, Any]:
+    """
+    Fetch verified breaking news for the exact target company using dual-stream RSS + Yahoo Finance:
+    1. General breaking headlines stream
+    2. High-signal Earnings Actuals, Guidance, Governance & Regulatory stream
+    3. Secondary ticker-specific Yahoo Finance news
+    """
+    articles: List[Dict[str, str]] = []
+    seen_titles: set = set()
+    clean_name = company_name.strip()
+
+    # Build strict entity search term
+    base_terms = f'"{clean_name}"'
+    if symbol and symbol != "PRIVATE / UNLISTED":
+        clean_sym = symbol.split(".")[0]
+        base_terms += f' OR "{symbol}"'
+        if len(clean_sym) >= 3:
+            base_terms += f' OR "{clean_sym}"'
+
+    # 1a. High-signal stream: Earnings actuals (revenue, EPS, guidance), leadership shifts & regulatory probes
+    catalyst_query = f'({base_terms}) (earnings OR revenue OR EPS OR guidance OR CEO OR resigns OR appointed OR investigation)'
+    articles.extend(_fetch_google_rss_stream(catalyst_query, clean_name, symbol, limit=max(4, max_results // 2), existing_titles=seen_titles))
+
+    # 1b. General breaking headlines stream
+    remaining = max(0, max_results - len(articles))
+    if remaining > 0:
+        articles.extend(_fetch_google_rss_stream(base_terms, clean_name, symbol, limit=remaining, existing_titles=seen_titles))
 
     # 2. Secondary: If public stock symbol is present, add ticker-specific news from yfinance
     if len(articles) < max_results and symbol and symbol != "PRIVATE / UNLISTED":

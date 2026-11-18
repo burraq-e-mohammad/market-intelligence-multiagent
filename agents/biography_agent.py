@@ -24,14 +24,14 @@ UNIVERSAL FACTUAL & TEMPORAL RULES:
         2. Reasons through corporate history and moat using the LLM with 2026 temporal awareness.
         3. Returns structured, extensive corporate background with dynamic entity profile.
         """
-        tool_result = get_company_biography(company_name)
+        tool_result = (shared_state.get("bio_tool_result") if shared_state else None) or get_company_biography(company_name)
         source = tool_result.get("source", "Verified Profile")
         summary = tool_result.get("summary", "")
         detailed_content = tool_result.get("detailed_content", summary)
         entity_profile = tool_result.get("entity_profile", {})
 
         founding_info = entity_profile.get("founding_info", "")
-        verified_leadership = entity_profile.get("verified_leadership", [])
+        verified_leadership = (shared_state.get("verified_leadership") if shared_state and shared_state.get("verified_leadership") else None) or entity_profile.get("verified_leadership", [])
         verified_acquisitions = entity_profile.get("verified_acquisitions", [])
         verified_segments = entity_profile.get("verified_segments", [])
         breaking_gov = list(dict.fromkeys(

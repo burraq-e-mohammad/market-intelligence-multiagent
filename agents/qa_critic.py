@@ -55,11 +55,16 @@ class QualityAssuranceAgent:
         if breaking_reg:
             outlook = dossier.get("strategic_outlook", "")
             news = dossier.get("recent_news_analysis", "")
-            first_reg_term = re.split(r'[:\(]', breaking_reg[0])[0].strip()
+            # Build a crisp, concise heading (split on :, ;, (, or comma and cap cleanly on word boundary)
+            raw_head = re.split(r'[:;\(\,]', breaking_reg[0])[0].strip().rstrip('.')
+            if len(raw_head) > 62:
+                raw_head = raw_head[:62].rsplit(' ', 1)[0].rstrip(',;:- ')
+            first_reg_term = raw_head or "Regulatory & Export-Control Oversight"
             if first_reg_term.lower() not in outlook.lower() and first_reg_term.lower() not in news.lower():
+                clean_reg_details = "; ".join(r.rstrip(". ") for r in breaking_reg)
                 reg_block = (
                     f"\n\n### Primary Regulatory & Compliance Risk: {first_reg_term}\n"
-                    f"Market observers and regulatory bodies are monitoring: {'; '.join(breaking_reg)}. "
+                    f"Market observers and regulatory bodies are monitoring: {clean_reg_details}. "
                     f"The enterprise maintains active compliance frameworks, legal oversight, and internal audit mechanisms to navigate domestic and global regulatory obligations."
                 )
                 dossier["strategic_outlook"] = outlook + reg_block
@@ -87,6 +92,24 @@ class QualityAssuranceAgent:
             )
             dossier["executive_summary"] = exec_txt
 
+        # 5. Cross-Section Governance Contradiction Guard (Sections 2 & 3 vs Section 5.2 News Catalysts)
+        # Prevents News Scout from claiming "Governance structures remain stable without disruptive transitions"
+        # when breaking governance transitions exist in shared_state!
+        breaking_gov: List[str] = shared_state.get("breaking_governance", [])
+        if breaking_gov and dossier.get("recent_news_analysis"):
+            clean_gov_summary = "; ".join(g.rstrip(". ") for g in breaking_gov)
+            replacement_gov = f"Corporate governance is undergoing a major executive transition: {clean_gov_summary}."
+            news_txt = dossier["recent_news_analysis"]
+            contradictory_patterns = [
+                r'Governance\s+structures?\s+remain[s]?\s+stable[^\.\n]*\.',
+                r'maintaining\s+a\s+standard\s+corporate\s+leadership\s+framework\s+without\s+disruptive\s+executive\s+transitions[^\.\n]*\.',
+                r'No\s+disruptive\s+executive\s+or\s+leadership\s+transitions[^\.\n]*\.',
+                r'Executive\s+leadership\s+remains\s+unchanged[^\.\n]*\.'
+            ]
+            for pat in contradictory_patterns:
+                news_txt = re.sub(pat, replacement_gov, news_txt, flags=re.IGNORECASE)
+            dossier["recent_news_analysis"] = news_txt
+
         return dossier
 
     def _sanitize_section(self, text: str, section_name: str, shared_state: Dict[str, Any]) -> str:
@@ -100,12 +123,21 @@ class QualityAssuranceAgent:
         verified_segments = shared_state.get("verified_segments", [])
         fiscal_cal = shared_state.get("fiscal_calendar") or metrics.get("fiscal_calendar") or {}
 
-        # A. Common Executive Name Typo Corrections (Generic)
+        # A. Common Executive Name & Erratic Capitalization Typo Corrections (Generic)
         text = re.sub(r'\bJenson\s+Huang\b', 'Jensen Huang', text)
         text = re.sub(r'\bJenson\b', 'Jensen', text)
+        # Fix erratic mid-sentence capitalization after common adverbs (e.g. "heavily Fixated" -> "heavily fixated")
+        text = re.sub(
+            r'\b(heavily|strongly|deeply|closely|largely|widely|rapidly|sharply|primarily|increasingly|remains|remain)\s+'
+            r'(Fixated|Focused|Driven|Positioned|Weighted|Exposed|Skewed|Anchored|Centered|Watched|Scrutinized|Pressured)\b',
+            lambda m: f"{m.group(1)} {m.group(2).lower()}",
+            text
+        )
 
-        # B. Comprehensive Post-Processing LaTeX / Math Artifact Stripper
-        # Clean patterns like ${}^{**}9.72x^{**}$, $P/E^{**}$, $At^{**}154.71^{**}$, $Al^{**}$ while preserving currency like $154.71
+        # B. Comprehensive Post-Processing LaTeX / Escaped Currency / Math Artifact Stripper
+        # 1) Unescape Markdown/LaTeX escaped punctuation FIRST (e.g. \$3.75T -> $3.75T, \$40,000 -> $40,000, \% -> %)
+        text = text.replace(r'\$', '$').replace(r'\%', '%').replace(r'\&', '&')
+        # 2) Clean patterns like ${}^{**}9.72x^{**}$, $P/E^{**}$, $P/E$, $At^{**}154.71^{**}$, $Al^{**}$ while preserving currency like $154.71
         text = re.sub(r'\$\s*\{\s*\}\s*\^\{\*+\}\s*([^\$\n]+?)\s*(?:\^\{\*+\})?\s*\$', r'\1', text)
         text = re.sub(r'\{\s*\}\s*\^\{\*+\}\s*([^\s\$\n]+?)\s*(?:\^\{\*+\})?', r'\1', text)
         text = re.sub(r'\$\s*At\^?\{?\*+\}?\s*([0-9\.\,]+)\^?\{?\*+\}?\s*\$?', r'At $\1', text)
@@ -113,7 +145,7 @@ class QualityAssuranceAgent:
         text = re.sub(r'\$Al\^\{\*\*\}', 'AI', text)
         text = re.sub(r'\$AI\^\{\*\*\}', 'AI', text)
         text = re.sub(r'\$Al\$', 'AI', text)
-        # Strip $TOKEN^{**}$ or $P/E^{**}$ or $EPS$
+        # Strip $TOKEN^{**}$ or $P/E$ or $EPS$ or $P/S$
         text = re.sub(r'\$([A-Za-z][A-Za-z0-9/\-\s]{0,20}?)(?:\^\{\*+\})?\$', r'\1', text)
         # Strip $9.72x$, $48.9%$, $.^{**}19.07x^{**}$
         text = re.sub(r'\$\.?(?:\^\{\*+\})?\s*([0-9\.\,]+[xX%])(?:\^\{\*+\})?\s*\$?', r'\1', text)
@@ -127,6 +159,10 @@ class QualityAssuranceAgent:
         text = text.replace("^{**}", "").replace("^{2}", "2").replace("^{3}", "3")
         text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
         text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
+        # Strip any stray '$' NOT immediately followed by a digit (valid currency like $3.75T stays intact!)
+        text = re.sub(r'\$(?![0-9])', '', text)
+        # Fix accidental double periods (e.g. "November 2026..") while preserving ellipses ("...")
+        text = re.sub(r'(?<!\.)\.\.(?!\.)', '.', text)
 
         # B2. Duplicated Phrasing Sanitizer (e.g. "With a PEG ratio of 0.20, PEG ratio of 0.20 reflects...")
         text = re.sub(

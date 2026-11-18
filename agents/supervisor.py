@@ -4,6 +4,7 @@ from agents.news_agent import NewsScoutAgent
 from agents.biography_agent import BiographyAgent
 from agents.qa_critic import QualityAssuranceAgent
 from tools.finance_tool import get_financial_metrics
+from tools.wiki_tool import get_company_biography
 from tools.pdf_tool import generate_pdf_report
 from tools.schemas import VerifiedOfficer, parse_officer_string, reconcile_officers
 from typing import Dict, Any, Optional, Callable, List
@@ -62,13 +63,42 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         emit("Research Supervisor", "Parent Director", "started", f"Initiating deep investigation project for '{clean_target}'...")
         print(f"\n[Parent Agent: {self.name}] Initiating research project for '{clean_target}'...")
 
-        # Step 1: Resolve Canonical Entity Classification & Single Source of Truth
-        emit("Research Supervisor", "Parent Director", "resolving", f"Resolving canonical entity classification and Single Source of Truth for '{clean_target}'...")
-        tool_fin = get_financial_metrics(clean_target)
+        # Step 1: Resolve Entity Classification, Financial State & Corporate Profile concurrently
+        # Pre-populating governance & regulatory facts into shared_state BEFORE subagents run
+        # guarantees Section 5 (News Scout) never contradicts Sections 2 & 3 on leadership transitions!
+        emit("Research Supervisor", "Parent Director", "resolving", f"Resolving canonical entity classification, financial feed, and corporate profile for '{clean_target}'...")
+        with ThreadPoolExecutor(max_workers=2) as pre_exec:
+            f_pre_fin = pre_exec.submit(get_financial_metrics, clean_target)
+            f_pre_bio = pre_exec.submit(get_company_biography, clean_target)
+            tool_fin = f_pre_fin.result()
+            tool_bio = f_pre_bio.result()
+
         is_public = tool_fin.get("is_public", False)
         metrics = tool_fin.get("data", {})
         company_name = metrics.get("company_name", clean_target)
         ticker = metrics.get("symbol", "PRIVATE / UNLISTED")
+
+        pre_profile = tool_bio.get("entity_profile", {})
+        pre_breaking_gov = pre_profile.get("breaking_governance", [])
+        pre_breaking_reg = pre_profile.get("breaking_regulatory", [])
+
+        pre_officer_cands: List[VerifiedOfficer] = []
+        for raw_off in (pre_profile.get("active_officers") or []):
+            try:
+                pre_officer_cands.append(VerifiedOfficer(**raw_off))
+            except Exception:
+                pass
+        if not pre_officer_cands:
+            for raw_str in (pre_profile.get("verified_leadership") or []):
+                parsed = parse_officer_string(raw_str, source="Verified Profile", priority=2)
+                if parsed:
+                    pre_officer_cands.append(parsed)
+        for sec_off in (metrics.get("sec_officers") or []):
+            try:
+                pre_officer_cands.append(VerifiedOfficer(**sec_off))
+            except Exception:
+                pass
+        pre_reconciled = reconcile_officers(pre_officer_cands, breaking_governance=pre_breaking_gov)
 
         shared_state = {
             "company_name": company_name,
@@ -76,6 +106,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             "is_public": is_public,
             "metrics": metrics,
             "current_price": metrics.get("current_price", "N/A"),
+            "extended_hours_context": metrics.get("extended_hours_context", ""),
             "market_cap": metrics.get("market_cap", "N/A"),
             "trailing_pe": metrics.get("trailing_pe", metrics.get("pe_ratio", "N/A")),
             "forward_pe": metrics.get("forward_pe", "N/A"),
@@ -94,6 +125,10 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             "industry": metrics.get("industry", "Enterprise Solutions"),
             "fiscal_calendar": metrics.get("fiscal_calendar", {}),
             "sec_officers": metrics.get("sec_officers", []),
+            "verified_leadership": [o.formatted() for o in pre_reconciled],
+            "breaking_governance": pre_breaking_gov,
+            "breaking_regulatory": pre_breaking_reg,
+            "bio_tool_result": tool_bio,
             "temporal_year": 2026
         }
 
@@ -218,13 +253,13 @@ DYNAMIC CORPORATE PROFILE & REAL-TIME CATALYSTS:
 - PEG Valuation Rationale: {peg_context}
 
 UNIVERSAL FACTUAL & CONTRADICTION PREVENTION DIRECTIVES:
-1. Under NO circumstances state or quote a share price, multiple, or market cap that contradicts the Verified State above.
+1. Under NO circumstances state or quote a regular-session share price, multiple, or market cap that contradicts the Verified State above. If extended-hours trading or fresh post-earnings actuals appear in Subagent 2 (News & Events), explicitly highlight those concrete figures (revenue, EPS, guidance, after-hours move) and note that market-data TTM feeds roll forward over 24-72 hours.
 2. STRICT ROLE-BINDING: Name ONLY the Verified Active Leadership & Officers above. NEVER attribute the CEO title to executives of unrelated companies or former/resigned officers, and never invent an undocumented COO.
 3. FISCAL QUARTER GROUNDING: Strictly use the company's fiscal quarter labels (most recent reported quarter: {recent_q if recent_q else 'latest fiscal period'}). Never confuse calendar quarters with non-calendar fiscal quarters.
 4. SENTIMENT COHESION: Section 1 (Executive Summary) MUST match the Verified Media & Market Sentiment Pulse ({sentiment_tone}). NEVER describe sentiment as 'constructive' or 'bullish' if the verified media pulse is bearish, cautious, or mixed!
 5. Business Architecture: Structure divisions strictly around the company's verified reporting units and products above.
 6. Strategic Risks: Explicitly evaluate any breaking regulatory investigations, compliance scrutiny, or trade inquiries identified above.
-7. FORMATTING & NEGATIVE CONSTRAINT: NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around text or ratios (use $ ONLY for currency figures like $154.71). NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt'. Never repeat phrases like 'With a PEG ratio of X, PEG ratio of X'.
+7. FORMATTING & NEGATIVE CONSTRAINT: NEVER escape dollar signs with backslashes (write $3.75T, NEVER \\$3.75T). NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around text or ratios (write P/E and 9.72x in plain text). NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt'. Never repeat phrases like 'With a PEG ratio of X, PEG ratio of X'.
 8. Do NOT leave any dangling headers or unfinished sentences.
 
 Section 1: EXECUTIVE_SUMMARY
@@ -265,10 +300,11 @@ STRATEGIC_OUTLOOK:
         else:
             # Dynamic fallback based on real facts, reconciled officers, and aligned sentiment tone
             if is_public:
+                clean_gov_join = "; ".join(g.rstrip(". ") for g in breaking_gov)
                 if breaking_gov and verified_leadership:
-                    gov_str = f"In corporate governance, active leadership is currently stewarded by {', '.join(verified_leadership)}; key developments include: {'; '.join(breaking_gov)}."
+                    gov_str = f"In corporate governance, active leadership is currently stewarded by {', '.join(verified_leadership)}; key developments include: {clean_gov_join}."
                 elif breaking_gov:
-                    gov_str = f"In corporate governance, recent key developments include: {'; '.join(breaking_gov)}."
+                    gov_str = f"In corporate governance, recent key developments include: {clean_gov_join}."
                 elif verified_leadership:
                     gov_str = f"Executive leadership is stewarded by verified active officers: {', '.join(verified_leadership)}."
                 else:
@@ -291,7 +327,8 @@ STRATEGIC_OUTLOOK:
                     f"{gov_str}"
                 )
                 
-                reg_risk_str = f"\n\n### Regulatory, Legal & Geopolitical Scrutiny\nKey regulatory observation points include: {'; '.join(breaking_reg)}. The enterprise actively maintains compliance mechanisms to navigate international and trade requirements." if breaking_reg else (
+                clean_reg_join = "; ".join(r.rstrip(". ") for r in breaking_reg)
+                reg_risk_str = f"\n\n### Regulatory, Legal & Geopolitical Scrutiny\nKey regulatory observation points include: {clean_reg_join}. The enterprise actively maintains compliance mechanisms to navigate international and trade requirements." if breaking_reg else (
                     "\n\n### Critical Risk Factors & Vulnerabilities\nPrimary operational and macro risks include foreign exchange volatility, competitive talent retention, potential enterprise IT budget rationalization, and evolving regulatory standards."
                 )
                 

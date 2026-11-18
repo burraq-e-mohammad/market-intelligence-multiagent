@@ -450,6 +450,19 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             target_mean_price = info.get("targetMeanPrice")
             recommendation = info.get("recommendationKey", "N/A")
 
+            # Capture Extended-Hours (Post-Market / Pre-Market) trading quote for post-earnings price context
+            post_price = info.get("postMarketPrice")
+            post_chg = info.get("postMarketChangePercent")
+            pre_price = info.get("preMarketPrice")
+            pre_chg = info.get("preMarketChangePercent")
+            extended_hours_context = ""
+            if post_price is not None:
+                pct_str = f" ({post_chg * 100:+.2f}%)" if isinstance(post_chg, (int, float)) and abs(post_chg) < 1 else (f" ({post_chg:+.2f}%)" if isinstance(post_chg, (int, float)) else "")
+                extended_hours_context = f"After-Hours: {post_price:.2f} {currency}{pct_str}"
+            elif pre_price is not None:
+                pct_str = f" ({pre_chg * 100:+.2f}%)" if isinstance(pre_chg, (int, float)) and abs(pre_chg) < 1 else (f" ({pre_chg:+.2f}%)" if isinstance(pre_chg, (int, float)) else "")
+                extended_hours_context = f"Pre-Market: {pre_price:.2f} {currency}{pct_str}"
+
             # Universal Fiscal Year End detection (from SEC/Yahoo lastFiscalYearEnd timestamp)
             fy_end_month = KNOWN_FISCAL_YEAR_ENDS.get(resolved_ticker, 12)
             last_fy_ts = info.get("lastFiscalYearEnd") or info.get("nextFiscalYearEnd")
@@ -460,6 +473,16 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                     pass
             fiscal_calendar = compute_fiscal_calendar_context(fy_end_month)
             sec_officers = extract_sec_officers(info)
+
+            # Detect TTM market-feed cutoff date (flags 24-72h data lag right after fresh earnings releases)
+            mrq_ts = info.get("mostRecentQuarter")
+            ttm_cutoff_label = ""
+            if isinstance(mrq_ts, (int, float)) and mrq_ts > 0:
+                try:
+                    mrq_dt = datetime.fromtimestamp(mrq_ts, tz=timezone.utc)
+                    ttm_cutoff_label = f"Feed TTM through {mrq_dt.strftime('%b %Y')} (may lag fresh 8-K earnings by 24-72h)"
+                except Exception:
+                    pass
 
             gross_pct = f"{gross_margins * 100:.2f}%" if gross_margins is not None else "N/A"
             op_pct = f"{operating_margins * 100:.2f}%" if operating_margins is not None else "N/A"
@@ -480,6 +503,8 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                         "sector": info.get("sector") or "Technology & Services",
                         "industry": info.get("industry") or "IT Services & Consulting",
                         "current_price": f"{current_price:.2f} {currency}" if current_price else "N/A",
+                        "extended_hours_context": extended_hours_context,
+                        "ttm_cutoff_label": ttm_cutoff_label,
                         "market_cap": format_number(market_cap, currency=currency),
                         "pe_ratio": f"{pe_ratio:.2f}" if pe_ratio else "N/A",
                         "trailing_pe": f"{trailing_pe:.2f}" if trailing_pe else "N/A",
@@ -511,6 +536,8 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             fy_end_month = KNOWN_FISCAL_YEAR_ENDS.get(resolved_ticker, 12)
             profile_copy["fiscal_calendar"] = compute_fiscal_calendar_context(fy_end_month)
             profile_copy.setdefault("sec_officers", [])
+            profile_copy.setdefault("extended_hours_context", "")
+            profile_copy.setdefault("ttm_cutoff_label", "Market-data feed TTM snapshot (may lag latest 8-K by 24-72h)")
             return {
                 "status": "success",
                 "is_public": True,
@@ -550,15 +577,20 @@ def generate_deterministic_financial_table(data: Dict[str, Any]) -> str:
 | **Valuation Metric** | Private Financing Rounds / Contract ARR | Primary Stakeholder Books | Private Basis |
 """
 
+    ext_row = ""
+    if data.get("extended_hours_context"):
+        ext_row = f"| **Extended-Hours Quote** | {data['extended_hours_context']} | Post/Pre-Market Trading Feed | Live Extended Session |\n"
+    ttm_basis = data.get("ttm_cutoff_label") or f"Trailing 12 Months GAAP ({data.get('revenue_scale_descriptor', 'Verified Scale')})"
+
     return f"""### Deterministic Valuation & Financial Matrix (Single Source of Truth)
 | Fundamental Metric | Verified Value | Calculation Basis | Verification Status |
 | :--- | :--- | :--- | :--- |
-| **Current Stock Price** | {data.get('current_price', 'N/A')} | Real-Time Market Feed | Verified Market Quote |
-| **Market Capitalization** | {data.get('market_cap', 'N/A')} | Diluted Shares x Current Price | Verified Market Cap |
+| **Current Stock Price** | {data.get('current_price', 'N/A')} | Regular Session Market Feed | Verified Market Quote |
+{ext_row}| **Market Capitalization** | {data.get('market_cap', 'N/A')} | Diluted Shares x Current Price | Verified Market Cap |
 | **Trailing P/E Ratio** | {data.get('trailing_pe', data.get('pe_ratio', 'N/A'))} | TTM GAAP Diluted EPS | Deterministic Multiple |
 | **Forward P/E Ratio** | {data.get('forward_pe', 'N/A')} | Wall Street Consensus Forward EPS | Deterministic Multiple |
 | **PEG Ratio** | {data.get('peg_ratio', 'N/A')} | Forward P/E / Consensus EPS Growth | Deterministic Multiple |
-| **TTM Revenue Volume** | {data.get('total_revenue', 'N/A')} | Trailing 12 Months GAAP ({data.get('revenue_scale_descriptor', 'Verified Scale')}) | Verified SEC TTM |
+| **TTM Revenue Volume** | {data.get('total_revenue', 'N/A')} | {ttm_basis} | Market Feed TTM |
 | **Gross Margin** | {data.get('gross_margins', 'N/A')} | GAAP Gross Profit / Revenue | Deterministic |
 | **Operating Margin** | {data.get('operating_margins', 'N/A')} | Operating Income / Revenue | Deterministic |
 | **Net Profit Margin** | {data.get('profit_margins', 'N/A')} | Net Income / Revenue | Deterministic |

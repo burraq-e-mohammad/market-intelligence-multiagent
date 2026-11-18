@@ -42,18 +42,21 @@ CRITICAL ARITHMETIC & FACTUAL RULES:
             fiscal_cal = metrics.get('fiscal_calendar') or (shared_state.get('fiscal_calendar') if shared_state else {}) or {}
             fiscal_summary = fiscal_cal.get('quarter_mapping_summary', 'Standard calendar fiscal year.')
             recent_q = fiscal_cal.get('most_recent_reported_quarter', '')
+            ext_hours = metrics.get('extended_hours_context', '')
+            ttm_cutoff = metrics.get('ttm_cutoff_label', '')
             
             prompt = f"""Evaluate these verified financial metrics for {metrics.get('company_name')} ({metrics.get('symbol')}):
 
 VERIFIED FINANCIAL METRICS (SINGLE SOURCE OF TRUTH):
 - Sector / Industry: {metrics.get('sector')} / {metrics.get('industry')}
 - Exchange Listing: {metrics.get('exchange')}
-- Current Share Price: {metrics.get('current_price')} (Market Quote - do NOT cite any other price)
+- Current Regular-Session Share Price: {metrics.get('current_price')} (Market Quote - do NOT cite any other regular close price)
+- Extended-Hours Trading Quote: {ext_hours if ext_hours else 'Regular session close (no active extended-hours delta)'}
 - Market Capitalization: {metrics.get('market_cap')}
 - Trailing P/E Ratio: {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))}
 - Forward P/E Ratio: {fwd_pe_val}
 - PEG Ratio: {peg_val} ({peg_rationale})
-- TTM Revenue (Trailing 12 Months): {rev_val} ({scale_desc}; do NOT label as FY annual actuals)
+- Market-Feed TTM Revenue: {rev_val} ({scale_desc}; {ttm_cutoff if ttm_cutoff else 'Trailing 12 Months GAAP; do NOT label as FY annual actuals'})
 - Operating Margin: {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))}
 - Net Profit Margin: {metrics.get('profit_margins')}
 - Revenue Growth (YoY): {metrics.get('revenue_growth_yoy', 'N/A')}
@@ -61,19 +64,20 @@ VERIFIED FINANCIAL METRICS (SINGLE SOURCE OF TRUTH):
 - Wall Street Consensus: {metrics.get('analyst_rating')} | Average Target: {metrics.get('analyst_target_price')}
 - Fiscal Calendar Grounding: {fiscal_summary}
 
-TEMPORAL ANCHOR, FISCAL CALENDAR & FORMATTING CONSTRAINTS:
+TEMPORAL ANCHOR, DATA-LAG AWARENESS & FORMATTING CONSTRAINTS:
 1. Fiscal Calendar: Strictly adhere to the corporate fiscal calendar above (most recently reported quarter: {recent_q if recent_q else 'latest fiscal period'}). Never confuse calendar quarters with non-calendar fiscal quarters.
-2. Strictly maintain internal consistency with the numbers above. Do not alter, round differently, or contradict any verified metric.
-3. PEG Ratio Guidance: {peg_rationale} Never calculate PEG by dividing Forward P/E by revenue growth.
-4. Scale Guidance: When referencing TTM revenue ({rev_val}), describe it as {scale_desc}.
-5. FORMATTING & NEGATIVE CONSTRAINT: NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around ratios or text (write plain text like 9.77x and P/E, using $ ONLY for currency amounts like $154.71). NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt'.
-6. Structure your qualitative commentary across these 3 sections:
+2. Data-Lag Transparency: Explicitly note when standard market-data TTM feeds reflect the prior reported cutoff and may lag a freshly released 8-K quarterly report by 24-72 hours until TTM roll-forward completes. If Extended-Hours Trading Quote is present, cite it alongside the regular-session close.
+3. Strictly maintain internal consistency with the numbers above. Do not alter, round differently, or contradict any verified metric.
+4. PEG Ratio Guidance: {peg_rationale} Never calculate PEG by dividing Forward P/E by revenue growth.
+5. Scale Guidance: When referencing TTM revenue ({rev_val}), describe it as {scale_desc}.
+6. FORMATTING & NEGATIVE CONSTRAINT: NEVER escape dollar signs with backslashes (write $3.75T, NEVER \\$3.75T). NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around ratios or text (write plain text like 9.77x and P/E, using $ ONLY for currency amounts like $154.71). NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt'.
+7. Structure your qualitative commentary across these 3 sections:
 ### 1. Valuation Architecture & Multiple Dynamics
 Analyze trailing vs. forward multiples ({metrics.get('trailing_pe', 'N/A')} trailing vs. {fwd_pe_val} forward) and the PEG ratio of {peg_val} anchored to multi-year EPS expansion.
 ### 2. Trading Corridor & Price Discovery Dynamics
-Evaluate the stock's 52-week channel ({metrics.get('52_week_low')} to {metrics.get('52_week_high')}) against the current quote of {metrics.get('current_price')}.
+Evaluate the stock's 52-week channel ({metrics.get('52_week_low')} to {metrics.get('52_week_high')}) against the regular quote of {metrics.get('current_price')} (and extended-hours quote if active).
 ### 3. Operating Profitability, Margins & Consensus Outlook
-Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_margins')}), and Wall Street rating targets."""
+Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_margins')}), feed roll-forward context, and Wall Street rating targets."""
 
             llm_analysis = self.generate_response(prompt)
             if "Report]" in llm_analysis:

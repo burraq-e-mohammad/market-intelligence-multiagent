@@ -14,8 +14,17 @@ def sanitize_text(text: str) -> str:
     if not text:
         return ""
     
-    # 1. Clean raw LaTeX / Math artifacts & Bleed while preserving valid currency ($154.71, $3.78T, $115.8B)
+    # 1. Clean raw LaTeX / Escaped Currency / Math artifacts while preserving valid currency ($154.71, $3.78T, $115.8B)
+    # Unescape Markdown/LaTeX escaped punctuation FIRST (e.g. \$3.75T -> $3.75T, \$40,000 -> $40,000)
+    text = text.replace(r'\$', '$').replace(r'\%', '%').replace(r'\&', '&')
     text = re.sub(r'\bJenson\b', 'Jensen', text)
+    # Fix erratic mid-sentence capitalization after common adverbs (e.g. "heavily Fixated" -> "heavily fixated")
+    text = re.sub(
+        r'\b(heavily|strongly|deeply|closely|largely|widely|rapidly|sharply|primarily|increasingly|remains|remain)\s+'
+        r'(Fixated|Focused|Driven|Positioned|Weighted|Exposed|Skewed|Anchored|Centered|Watched|Scrutinized|Pressured)\b',
+        lambda m: f"{m.group(1)} {m.group(2).lower()}",
+        text
+    )
     # Handle ${}^{**}9.72x^{**}$ and {}^{**}9.72x^{**}
     text = re.sub(r'\$\s*\{\s*\}\s*\^\{\*+\}\s*([^\$\n]+?)\s*(?:\^\{\*+\})?\s*\$', r'\1', text)
     text = re.sub(r'\{\s*\}\s*\^\{\*+\}\s*([^\s\$\n]+?)\s*(?:\^\{\*+\})?', r'\1', text)
@@ -24,7 +33,7 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r'\$Al\^\{\*\*\}', 'AI', text)
     text = re.sub(r'\$AI\^\{\*\*\}', 'AI', text)
     text = re.sub(r'\$Al\$', 'AI', text)
-    # Strip $P/E^{**}$, $EPS$, $AI$, etc.
+    # Strip $P/E^{**}$, $P/E$, $EPS$, $AI$, etc.
     text = re.sub(r'\$([A-Za-z][A-Za-z0-9/\-\s]{0,20}?)(?:\^\{\*+\})?\$', r'\1', text)
     # Strip $9.72x$, $48.9%$, $.^{**}19.07x^{**}$
     text = re.sub(r'\$\.?(?:\^\{\*+\})?\s*([0-9\.\,]+[xX%])(?:\^\{\*+\})?\s*\$?', r'\1', text)
@@ -43,6 +52,8 @@ def sanitize_text(text: str) -> str:
     text = text.replace("**", "")
     # Remove any stray '$' NOT followed by a digit (currency)
     text = re.sub(r'\$(?![0-9])', '', text)
+    # Fix accidental double periods (e.g. "November 2026..") while preserving ellipses ("...")
+    text = re.sub(r'(?<!\.)\.\.(?!\.)', '.', text)
     # Clean duplicated PEG phrasing if present
     text = re.sub(r'\bWith\s+a\s+(PEG\s+ratio\s+of\s+[0-9\.]+)\s*,\s*\1\b', r'A \1', text, flags=re.IGNORECASE)
     text = re.sub(r'\bcanonical\b', 'verified', text, flags=re.IGNORECASE)
@@ -145,7 +156,7 @@ class IntelligenceReportPDF(FPDF):
         self.ln(4)
         self.set_font("Helvetica", "B", 13)
         self.set_text_color(15, 23, 42) # Dark slate
-        self.cell(0, 8, sanitize_text(title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.multi_cell(0, 7.5, sanitize_text(title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         # Accent underline
         self.set_draw_color(59, 130, 246) # Blue
         self.set_line_width(0.7)
@@ -157,7 +168,7 @@ class IntelligenceReportPDF(FPDF):
         self.set_font("Helvetica", "B", 10.5)
         self.set_text_color(30, 58, 138) # Deep navy blue
         clean_title = sanitize_text(title.replace("#", "").strip())
-        self.cell(0, 6, clean_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.multi_cell(0, 6, clean_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     def body_paragraph(self, text: str):
         lines = text.split("\n")
@@ -275,9 +286,9 @@ def generate_pdf_report(
             url = sanitize_text(a.get("url", ""))
             
             pdf.set_text_color(30, 64, 175) # Blue link style
-            pdf.cell(0, 4.5, f"{i}. {title}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(0, 4.5, f"{i}. {title}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_text_color(100, 116, 139) # Grey meta
-            pdf.cell(0, 4, f"   Publisher: {source} | Date: {date}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(0, 4, f"   Publisher: {source} | Date: {date}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             if url:
                 pdf.cell(0, 4, f"   URL: {url[:80]}...", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1.5)

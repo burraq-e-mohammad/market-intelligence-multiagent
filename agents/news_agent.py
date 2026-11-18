@@ -45,7 +45,7 @@ Outline emerging risks, market vulnerabilities, export-control or regulatory inv
         2. Reasons through recent events using the LLM with locked verified state & fiscal calendar.
         3. Returns structured sentiment & news summary with dynamically detected events and aligned sentiment pulse.
         """
-        tool_result = get_company_news(company_name, symbol=symbol, max_results=6)
+        tool_result = get_company_news(company_name, symbol=symbol, max_results=8)
         articles: List[Dict[str, str]] = tool_result.get("articles", [])
         detected_events = tool_result.get("detected_events", {})
         baseline_sentiment = tool_result.get("sentiment_pulse", {
@@ -54,11 +54,19 @@ Outline emerging risks, market vulnerabilities, export-control or regulatory inv
             "rationale": "Recent headlines reflect steady operational coverage."
         })
         
-        gov_events = detected_events.get("governance_events", [])
-        reg_risks = detected_events.get("regulatory_risks", [])
+        # Merge shared_state corporate governance/regulatory events with live RSS detections
+        # Prevents Section 5.2 from contradicting Sections 2 & 3 when RSS focuses on earnings/ETFs!
+        shared_gov = (shared_state.get("breaking_governance") or []) if shared_state else []
+        shared_reg = (shared_state.get("breaking_regulatory") or []) if shared_state else []
+        verified_officers = (shared_state.get("verified_leadership") or []) if shared_state else []
+
+        gov_events = list(dict.fromkeys(shared_gov + (detected_events.get("governance_events") or [])))
+        reg_risks = list(dict.fromkeys(shared_reg + (detected_events.get("regulatory_risks") or [])))
         comm_milestones = detected_events.get("commercial_milestones", [])
+        earnings_disclosures = detected_events.get("earnings_disclosures", [])
 
         market_price = shared_state.get("current_price", "") if shared_state else ""
+        extended_hours = (shared_state.get("metrics", {}).get("extended_hours_context", "") if shared_state else "")
         market_cap = shared_state.get("market_cap", "") if shared_state else ""
         fiscal_cal = (shared_state.get("fiscal_calendar") or {}) if shared_state else {}
         fiscal_summary = fiscal_cal.get("quarter_mapping_summary", "Standard calendar fiscal year.")
@@ -81,14 +89,17 @@ Outline emerging risks, market vulnerabilities, export-control or regulatory inv
         prompt = f"""Analyze the recent media stream for {company_name}:
 
 VERIFIED MARKET STATE (SINGLE SOURCE OF TRUTH):
-- Current Share Price: {market_price if market_price else 'Refer to verified quote'}
+- Current Regular-Session Share Price: {market_price if market_price else 'Refer to verified quote'}
+- Extended-Hours Trading Context: {extended_hours if extended_hours else 'Regular session close (no active after-hours feed delta)'}
 - Market Capitalization: {market_cap if market_cap else 'Refer to verified cap'}
+- Verified Active Leadership: {", ".join(verified_officers) if verified_officers else 'Documented corporate officers'}
 - Fiscal Calendar Grounding: {fiscal_summary}
 - Most Recently Completed/Reported Fiscal Quarter: {recent_q if recent_q else 'Refer to filing schedule'}
 
 DYNAMICALLY DETECTED CORPORATE CATALYSTS & RISKS:
-- Breaking Governance & Leadership Shifts: {"; ".join(gov_events) if gov_events else 'Standard corporate leadership structure'}
+- Verified Governance & Leadership Shifts: {"; ".join(gov_events) if gov_events else 'No new governance filings beyond documented leadership profile'}
 - Regulatory, Antitrust & Compliance Inquiries: {"; ".join(reg_risks) if reg_risks else 'Standard regulatory trade compliance'}
+- Post-Earnings Disclosures & Guidance: {"; ".join(earnings_disclosures) if earnings_disclosures else 'Refer to verified headlines below'}
 - Commercial & Product Milestones: {"; ".join(comm_milestones) if comm_milestones else 'Active commercial delivery'}
 - Baseline Media Pulse: {baseline_sentiment.get('tone')}
 
@@ -96,11 +107,12 @@ VERIFIED NEWS HEADLINES & MEDIA STREAM:
 {headlines_text}
 
 CRITICAL CONSISTENCY & FACTUAL DIRECTIVES:
-1. Under NO circumstances cite a historical or pre-split share price as the current price. The only current trading price is {market_price}.
-2. FISCAL QUARTER ACCURACY: Strictly label any recent earnings release according to the Fiscal Calendar Grounding above ({recent_q if recent_q else 'exact fiscal quarter'}). NEVER confuse calendar quarters with non-calendar fiscal quarters!
-3. Leadership Transitions: Accurately synthesize governance. Detail any breaking executive appointments or resignations from the detected catalysts above without misattributing titles from other companies.
-4. In Section 3 (Strategic Risks & Competitive Pressures), detail any verified regulatory investigations, export control compliance inquiries, or legal scrutiny identified in the headlines.
-5. NEGATIVE CONSTRAINT: NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt', and NEVER emit LaTeX math formatting like $P/E^{{**}}$ or $^{{**}}9.72x^{{**}}$.
+1. PRICE & EXTENDED HOURS: Never cite a historical pre-split share price as current. Regular-session price is {market_price}. If Extended-Hours Trading Context or post-earnings headlines report an after-hours/pre-market move, explicitly cite that extended-hours context alongside the regular close.
+2. CONCRETE POST-EARNINGS ACTUALS: Whenever the headlines/snippets contain concrete reported earnings numbers (actual quarterly revenue, GAAP/non-GAAP EPS, consensus beat, or next-quarter revenue guidance), you MUST explicitly state those exact figures rather than stopping at vague pre-earnings preview language!
+3. FISCAL QUARTER ACCURACY: Strictly label any recent earnings release according to the Fiscal Calendar Grounding above ({recent_q if recent_q else 'exact fiscal quarter'}). NEVER confuse calendar quarters with non-calendar fiscal quarters!
+4. CROSS-SECTION LEADERSHIP COHESION: Accurately reflect Verified Governance & Leadership Shifts above. If an executive transition occurred (e.g., resignation or Interim CEO appointment), NEVER claim that 'governance structures remain stable without disruptive executive transitions'!
+5. In Section 3 (Strategic Risks & Competitive Pressures), detail any verified regulatory investigations, export control compliance inquiries, or legal scrutiny identified above.
+6. FORMATTING & NEGATIVE CONSTRAINT: NEVER escape dollar signs with backslashes (write $3.75T, NEVER \\$3.75T). NEVER wrap text or ratios in LaTeX $...$ math delimiters (write P/E and 9.72x in plain text). NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt'.
 
 Format strictly into 3 sections:
 ### 1. Macro Sentiment & Media Narrative
@@ -123,14 +135,14 @@ Deliver an in-depth, professional briefing."""
             bullet_points = "; ".join([f"'{a['title']}' ({a['source']})" for a in articles[:3]])
             sec2_text = f"Significant recent coverage highlights key corporate and partner milestones: {bullet_points}."
             if gov_events:
-                sec2_text += f"\n\nIn corporate governance, key executive updates include: {'; '.join(gov_events)}."
+                sec2_text += f"\n\nIn corporate governance, key executive updates include: {'; '.join(g.rstrip('. ') for g in gov_events)}."
 
             sec3_text = (
                 f"As industry competition accelerates, primary risk factors center on enterprise budget cycles, "
                 f"execution agility, and broader macroeconomic technology trends."
             )
             if reg_risks:
-                sec3_text += f"\n\nFrom a regulatory perspective, market observers are monitoring: {'; '.join(reg_risks)}."
+                sec3_text += f"\n\nFrom a regulatory perspective, market observers are monitoring: {'; '.join(r.rstrip('. ') for r in reg_risks)}."
 
             llm_analysis = (
                 f"### 1. Macro Sentiment & Media Narrative\n{sec1_text}\n\n"
