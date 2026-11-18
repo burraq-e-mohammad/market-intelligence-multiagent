@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import os
 import json
+import base64
 import queue
 import threading
 from agents.supervisor import ResearchSupervisor
@@ -71,7 +72,10 @@ def conduct_research(request: ResearchRequest):
         
     try:
         results = supervisor.run_investigation(target)
-        dossier = results["dossier"]
+        dossier = dict(results["dossier"])
+        if isinstance(dossier.get("shared_state"), dict):
+            ss_clean = {k: v for k, v in dossier["shared_state"].items() if k != "bio_tool_result"}
+            dossier["shared_state"] = ss_clean
         
         return {
             "status": "success",
@@ -104,7 +108,22 @@ def conduct_research_stream(request: ResearchRequest):
                     results = supervisor.run_investigation(target, progress_callback=on_progress)
                 except TypeError:
                     results = supervisor.run_investigation(target)
-                event_queue.put({"type": "done", "results": results})
+
+                # Prepare JSON-safe payload (convert raw pdf_bytes to base64 and omit internal raw tool dump)
+                raw_dossier = dict(results.get("dossier") or {})
+                if isinstance(raw_dossier.get("shared_state"), dict):
+                    raw_dossier["shared_state"] = {
+                        k: v for k, v in raw_dossier["shared_state"].items() if k != "bio_tool_result"
+                    }
+                pdf_raw = results.get("pdf_bytes")
+                pdf_b64 = base64.b64encode(pdf_raw).decode("ascii") if isinstance(pdf_raw, (bytes, bytearray)) else None
+
+                safe_results = {
+                    "dossier": raw_dossier,
+                    "pdf_b64": pdf_b64,
+                    "execution_time": results.get("execution_time")
+                }
+                event_queue.put({"type": "done", "results": safe_results})
             except Exception as exc:
                 event_queue.put({"type": "error", "error": str(exc)})
             finally:
@@ -117,7 +136,7 @@ def conduct_research_stream(request: ResearchRequest):
             item = event_queue.get()
             if item is None:
                 break
-            yield json.dumps(item) + "\n"
+            yield json.dumps(item, default=str) + "\n"
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 

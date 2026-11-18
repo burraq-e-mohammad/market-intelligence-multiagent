@@ -147,7 +147,7 @@ if execute_btn or preset:
 
     with st.status(f"🚀 Multi-Agent Team Investigating: '{query_target}'...", expanded=True) as status:
         dossier = None
-        pdf_path = None
+        pdf_bytes = None
         execution_time = None
 
         # 1. Attempt Streaming Call to FastAPI Backend
@@ -172,16 +172,24 @@ if execute_btn or preset:
                                 elif item.get("type") == "done":
                                     results = item.get("results", {})
                                     dossier = results.get("dossier")
-                                    pdf_bytes = results.get("pdf_bytes")
+                                    pdf_b64 = results.get("pdf_b64")
+                                    if pdf_b64:
+                                        import base64
+                                        pdf_bytes = base64.b64decode(pdf_b64)
+                                    else:
+                                        pdf_bytes = results.get("pdf_bytes")
                                     execution_time = results.get("execution_time")
                                 elif item.get("type") == "error":
                                     status.write(f"⚠️ Worker notice: {item.get('error')}")
+                    elif response.status_code == 404:
+                        status.write("⚠️ Older FastAPI server detected on port 8000 (missing `/api/research/stream`). Restart backend to enable API streaming; continuing in Direct Mode...")
             except Exception:
                 pass
 
         # 2. Fallback: Direct Agent Execution with live callback
         if not dossier:
             import importlib
+            import tools.schemas
             import tools.wiki_tool
             import tools.news_tool
             import tools.finance_tool
@@ -192,6 +200,7 @@ if execute_btn or preset:
             import agents.qa_critic
             import agents.supervisor
 
+            importlib.reload(tools.schemas)
             importlib.reload(tools.wiki_tool)
             importlib.reload(tools.news_tool)
             importlib.reload(tools.finance_tool)
