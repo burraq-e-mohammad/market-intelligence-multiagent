@@ -242,22 +242,31 @@ def reconcile_officers(
 
     active = sorted(deduped, key=lambda o: (o.priority, 0 if o.role_category in ("INTERIM_CEO", "CEO") else 1))
 
-    # 4. Enforce Singular CEO / Interim CEO Cardinality
+    # 4. Enforce Singular CEO/Interim CEO & Singular CFO Cardinality
     has_interim_ceo = any(o.role_category == "INTERIM_CEO" for o in active)
     final_officers: List[VerifiedOfficer] = []
     ceo_slot_filled = False
+    cfo_slot_filled = False
 
     for officer in active:
         if officer.role_category == "INTERIM_CEO":
             if not ceo_slot_filled:
                 final_officers.append(officer)
                 ceo_slot_filled = True
+                if "cfo" in officer.title.lower():
+                    cfo_slot_filled = True
         elif officer.role_category == "CEO":
             if has_interim_ceo or ceo_slot_filled:
                 # Skip duplicate/stale CEO when an Interim CEO or higher-priority CEO is already bound
                 continue
             final_officers.append(officer)
             ceo_slot_filled = True
+        elif officer.role_category == "CFO":
+            if cfo_slot_filled:
+                # Skip stale lower-priority CFO when a higher-priority/live CFO is already bound
+                continue
+            final_officers.append(officer)
+            cfo_slot_filled = True
         else:
             final_officers.append(officer)
 

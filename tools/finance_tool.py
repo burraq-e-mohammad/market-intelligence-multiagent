@@ -481,13 +481,17 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             fiscal_calendar = compute_fiscal_calendar_context(fy_end_month)
             sec_officers = extract_sec_officers(info)
 
-            # Detect TTM market-feed cutoff date (flags 24-72h data lag right after fresh earnings releases)
+            # Detect TTM market-feed cutoff date (only flag 24-72h data lag when feed quarter is >95 days old)
             mrq_ts = info.get("mostRecentQuarter")
             ttm_cutoff_label = ""
             if isinstance(mrq_ts, (int, float)) and mrq_ts > 0:
                 try:
                     mrq_dt = datetime.fromtimestamp(mrq_ts, tz=timezone.utc)
-                    ttm_cutoff_label = f"Feed TTM through {mrq_dt.strftime('%b %Y')} (may lag fresh 8-K earnings by 24-72h)"
+                    age_days = (datetime.now(timezone.utc) - mrq_dt).days
+                    if age_days > 95:
+                        ttm_cutoff_label = f"Feed TTM through {mrq_dt.strftime('%b %Y')} (may lag latest 8-K earnings by 24-72h)"
+                    else:
+                        ttm_cutoff_label = f"Trailing 12 Months GAAP through {mrq_dt.strftime('%b %Y')} (Current Filing)"
                 except Exception:
                     pass
 

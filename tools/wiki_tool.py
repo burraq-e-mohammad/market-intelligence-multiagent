@@ -44,10 +44,10 @@ VERIFIED_CORPORATE_REGISTRY = {
             "verified_leadership": [
                 "Tim Cook (CEO)",
                 "Arthur D. Levinson (Chair of the Board)",
-                "Luca Maestri (CFO)"
+                "Kevan Parekh (CFO)"
             ],
             "breaking_governance": [
-                "Executive team operates under CEO Tim Cook and Chair Arthur D. Levinson."
+                "Executive team operates under CEO Tim Cook, CFO Kevan Parekh, and Chair Arthur D. Levinson."
             ],
             "verified_acquisitions": [
                 "Beats Electronics (closed 2014, $3B)",
@@ -815,17 +815,24 @@ def get_company_biography(company_name: str) -> Dict[str, Any]:
         
         profile = extract_structured_entity_profile(page.title, summary, detailed_body)
         
-        # Reconcile extracted profile with authoritative registry if matched (prevents stale/noisy overrides)
+        # Reconcile extracted profile with fallback registry:
+        # Live Wikipedia Infobox officers take priority=1 (freshest live source);
+        # registry officers act as priority=2 fallback if Infobox is missing/incomplete.
         if reg_match:
             reg_prof = reg_match.get("entity_profile", {})
             reg_officers = []
             for raw_off in reg_prof.get("verified_leadership", []):
-                parsed = parse_officer_string(raw_off, source="Authoritative Registry", priority=1)
+                parsed = parse_officer_string(raw_off, source="Authoritative Registry", priority=2)
                 if parsed:
                     reg_officers.append(parsed)
-            wiki_officers = [VerifiedOfficer(**o) for o in profile.get("active_officers", [])]
+            wiki_officers = []
+            for o in profile.get("active_officers", []):
+                vo = VerifiedOfficer(**o)
+                if vo.source == "Wikipedia Infobox":
+                    vo.priority = 1
+                wiki_officers.append(vo)
             merged_officers = reconcile_officers(
-                reg_officers + wiki_officers,
+                wiki_officers + reg_officers,
                 breaking_governance=reg_prof.get("breaking_governance", [])
             )
             profile["active_officers"] = [o.model_dump() for o in merged_officers]

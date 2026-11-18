@@ -128,6 +128,13 @@ def _fetch_google_rss_stream(query_terms: str, clean_name: str, symbol: str, lim
 
             title_lower = title.lower()
             if clean_name_lower in title_lower or (clean_sym and len(clean_sym) >= 3 and re.search(rf'\b{re.escape(clean_sym)}\b', title_lower)):
+                # Skip non-material viral political soundbites / tangential gossip (e.g. "says ex Apple CEO is a legend, should replace ... at Nvidia")
+                # while keeping genuine regulatory, tariff, antitrust, or policy actions
+                is_material_policy = bool(re.search(r'\b(tariff|antitrust|doj|ftc|sec|eu|dma|probe|lawsuit|export|sanction|ban|fine|settlement|regulator)\b', title_lower))
+                is_tangential_soundbite = bool(re.search(r'\b(should\s+replace|is\s+[\'"]?a\s+legend[\'"]?|calls\s+[\w\s]+\s+a\s+legend|mistakenly\s+calls|gaffe|quips)\b', title_lower))
+                if is_tangential_soundbite and not is_material_policy:
+                    continue
+
                 m = re.search(r'([A-Za-z0-9]+)\s+Systems\s+Limited', title, re.IGNORECASE)
                 if m and clean_name_lower == "systems limited":
                     prev_word = m.group(1).lower()
