@@ -37,17 +37,24 @@ class QualityAssuranceAgent:
                 dossier[field] = self._sanitize_section(dossier[field], field, shared_state)
 
         # 2. Reconcile stock price conflicts (pre-split vs current adjusted quote)
+        # Strictly scoped to explicit share-price contexts; NEVER triggers on revenue, market cap, or valuation ($797.46B, $852 billion, etc.)!
         if canonical_price and canonical_price != "N/A":
             clean_price_num = re.sub(r'[^0-9\.]', '', canonical_price.split()[0])
-            for field in text_fields:
-                val = dossier.get(field, "")
-                if clean_price_num and float(clean_price_num) < 300:
-                    val = re.sub(
-                        r'\$([789][0-9]{2}(?:\.[0-9]+)?)\b',
-                        r'$\1 (historical pre-split price; current adjusted price: ' + canonical_price + ')',
-                        val
-                    )
-                    dossier[field] = val
+            if clean_price_num and float(clean_price_num) < 300:
+                price_ctx_pat = re.compile(
+                    r'(\b(?:share\s+price|stock\s+price|trading\s+at|trades\s+at|priced\s+at|closed\s+at|quote\s+of|price\s+of)\s+(?:of\s+|near\s+|around\s+)?)'
+                    r'\$([789][0-9]{2}(?:\.[0-9]+)?)'
+                    r'(?![0-9\.]|\s*(?:B|M|T|K|billion|million|trillion|thousand|revenue|cap|sales|valuation)\b)',
+                    re.IGNORECASE
+                )
+                for field in text_fields:
+                    val = dossier.get(field, "")
+                    if val:
+                        val = price_ctx_pat.sub(
+                            r'\1$\2 (historical pre-split price; current adjusted price: ' + canonical_price + ')',
+                            val
+                        )
+                        dossier[field] = val
 
         # 3. Dynamic Regulatory Risk Integration
         # If live news detected regulatory, antitrust, or export-control inquiries, ensure they appear in strategic outlook
