@@ -56,26 +56,42 @@ def wait_for_backend(timeout: int = 20) -> bool:
         time.sleep(0.5)
     return False
 
-def run_backend():
+def run_backend(reload_mode: bool = False):
     free_port(8000)
     print("🚀 Starting FastAPI Backend at http://127.0.0.1:8000...")
-    return subprocess.Popen([sys.executable, "-m", "uvicorn", "backend.api:app", "--host", "127.0.0.1", "--port", "8000", "--reload"])
+    cmd = [sys.executable, "-m", "uvicorn", "backend.api:app", "--host", "127.0.0.1", "--port", "8000"]
+    if reload_mode:
+        cmd.append("--reload")
+    return subprocess.Popen(cmd)
 
 def run_frontend():
     print("🌐 Starting Streamlit Dashboard at http://localhost:8501...")
     return subprocess.Popen([sys.executable, "-m", "streamlit", "run", "frontend/app.py", "--server.port", "8501", "--server.headless", "true"])
 
+def shutdown_processes(processes):
+    for p in processes:
+        if p.poll() is None:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(p.pid), "/F", "/T"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            else:
+                p.terminate()
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-Agent Market Intelligence Launcher")
     parser.add_argument("--backend-only", action="store_true", help="Launch only FastAPI backend")
     parser.add_argument("--frontend-only", action="store_true", help="Launch only Streamlit dashboard")
+    parser.add_argument("--reload", action="store_true", help="Enable Uvicorn auto-reload (not recommended on Windows launcher)")
     args = parser.parse_args()
 
     processes = []
 
     try:
         if args.backend_only:
-            p_back = run_backend()
+            p_back = run_backend(reload_mode=args.reload)
             processes.append(p_back)
             p_back.wait()
         elif args.frontend_only:
@@ -83,7 +99,7 @@ def main():
             processes.append(p_front)
             p_front.wait()
         else:
-            p_back = run_backend()
+            p_back = run_backend(reload_mode=args.reload)
             processes.append(p_back)
             print("⏳ Waiting for FastAPI backend & /api/research/stream to come online...")
             if wait_for_backend(timeout=20):
@@ -100,9 +116,10 @@ def main():
 
     except KeyboardInterrupt:
         print("\n🛑 Shutting down servers...")
-        for p in processes:
-            p.terminate()
+        shutdown_processes(processes)
         sys.exit(0)
+    finally:
+        shutdown_processes(processes)
 
 if __name__ == "__main__":
     main()
