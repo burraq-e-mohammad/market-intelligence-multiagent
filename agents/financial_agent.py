@@ -39,6 +39,9 @@ CRITICAL ARITHMETIC & FACTUAL RULES:
             rev_val = metrics.get('total_revenue', 'N/A')
             scale_desc = metrics.get('revenue_scale_descriptor', 'commercial scale')
             peg_rationale = metrics.get('peg_rationale', 'PEG reflects multiple valuation against consensus multi-year EPS growth.')
+            fiscal_cal = metrics.get('fiscal_calendar') or (shared_state.get('fiscal_calendar') if shared_state else {}) or {}
+            fiscal_summary = fiscal_cal.get('quarter_mapping_summary', 'Standard calendar fiscal year.')
+            recent_q = fiscal_cal.get('most_recent_reported_quarter', '')
             
             prompt = f"""Evaluate these verified financial metrics for {metrics.get('company_name')} ({metrics.get('symbol')}):
 
@@ -56,13 +59,14 @@ VERIFIED FINANCIAL METRICS (SINGLE SOURCE OF TRUTH):
 - Revenue Growth (YoY): {metrics.get('revenue_growth_yoy', 'N/A')}
 - 52-Week Range: {metrics.get('52_week_low')} to {metrics.get('52_week_high')}
 - Wall Street Consensus: {metrics.get('analyst_rating')} | Average Target: {metrics.get('analyst_target_price')}
+- Fiscal Calendar Grounding: {fiscal_summary}
 
-TEMPORAL ANCHOR & ARITHMETIC CONSTRAINTS:
-1. Current calendar year is 2026.
+TEMPORAL ANCHOR, FISCAL CALENDAR & FORMATTING CONSTRAINTS:
+1. Fiscal Calendar: Strictly adhere to the corporate fiscal calendar above (most recently reported quarter: {recent_q if recent_q else 'latest fiscal period'}). Never confuse calendar quarters with non-calendar fiscal quarters.
 2. Strictly maintain internal consistency with the numbers above. Do not alter, round differently, or contradict any verified metric.
 3. PEG Ratio Guidance: {peg_rationale} Never calculate PEG by dividing Forward P/E by revenue growth.
 4. Scale Guidance: When referencing TTM revenue ({rev_val}), describe it as {scale_desc}.
-5. NEGATIVE CONSTRAINT: NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt' in your text.
+5. FORMATTING & NEGATIVE CONSTRAINT: NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around ratios or text (write plain text like 9.77x and P/E, using $ ONLY for currency amounts like $154.71). NEVER use meta words like 'canonical', 'provided', 'supplied', or 'prompt'.
 6. Structure your qualitative commentary across these 3 sections:
 ### 1. Valuation Architecture & Multiple Dynamics
 Analyze trailing vs. forward multiples ({metrics.get('trailing_pe', 'N/A')} trailing vs. {fwd_pe_val} forward) and the PEG ratio of {peg_val} anchored to multi-year EPS expansion.
@@ -78,7 +82,7 @@ Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_mar
                     f"{metrics.get('company_name')} ({metrics.get('symbol')}) trades on the {metrics.get('exchange', 'Stock Exchange')} "
                     f"commanding an aggregate market capitalization of {metrics.get('market_cap')}. "
                     f"The equity commands a trailing price-to-earnings (P/E) multiple of {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))} and a forward P/E of {metrics.get('forward_pe', 'N/A')}. "
-                    f"With a PEG ratio of {peg_val}, {peg_rationale}\n\n"
+                    f"A {peg_rationale}\n\n"
                     f"### 2. Trading Corridor & Price Discovery Dynamics\n"
                     f"Currently priced at {metrics.get('current_price')}, the equity oscillates within its verified 52-week corridor of {metrics.get('52_week_low')} - {metrics.get('52_week_high')}. "
                     f"This trading channel underscores liquidity depth and market re-rating amidst macroeconomic interest rate shifts.\n\n"

@@ -3,30 +3,48 @@ import re
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 def sanitize_text(text: str) -> str:
     """
-    Sanitize unicode characters, dashes, quotes, and LaTeX artifacts for clean typography in PDF & Markdown.
-    Completely eliminates '?' character corruptions and broken delimiters.
+    Sanitize unicode characters, dashes, quotes, Markdown bold/code tokens, and LaTeX artifacts
+    for clean typography in rendered PDF output.
+    Completely eliminates '?', stray '$', '**', '^{}', and broken math delimiters.
     """
     if not text:
         return ""
     
-    # 1. Clean raw LaTeX / Math artifacts & Bleed
-    # e.g. $At^{**}154.71^{**}$ -> At $154.71, $Al^{**}$ -> AI, $.^{**}19.07x^{**}$ -> 19.07x, $3.64T -> $3.64T
+    # 1. Clean raw LaTeX / Math artifacts & Bleed while preserving valid currency ($154.71, $3.78T, $115.8B)
     text = re.sub(r'\bJenson\b', 'Jensen', text)
+    # Handle ${}^{**}9.72x^{**}$ and {}^{**}9.72x^{**}
+    text = re.sub(r'\$\s*\{\s*\}\s*\^\{\*+\}\s*([^\$\n]+?)\s*(?:\^\{\*+\})?\s*\$', r'\1', text)
+    text = re.sub(r'\{\s*\}\s*\^\{\*+\}\s*([^\s\$\n]+?)\s*(?:\^\{\*+\})?', r'\1', text)
     text = re.sub(r'\$\s*At\^?\{?\*+\}?\s*([0-9\.\,]+)\^?\{?\*+\}?\s*\$?', r'At $\1', text)
     text = re.sub(r'\$At\^\{\*\*\}', 'At $', text)
     text = re.sub(r'\$Al\^\{\*\*\}', 'AI', text)
     text = re.sub(r'\$AI\^\{\*\*\}', 'AI', text)
     text = re.sub(r'\$Al\$', 'AI', text)
+    # Strip $P/E^{**}$, $EPS$, $AI$, etc.
+    text = re.sub(r'\$([A-Za-z][A-Za-z0-9/\-\s]{0,20}?)(?:\^\{\*+\})?\$', r'\1', text)
+    # Strip $9.72x$, $48.9%$, $.^{**}19.07x^{**}$
+    text = re.sub(r'\$\.?(?:\^\{\*+\})?\s*([0-9\.\,]+[xX%])(?:\^\{\*+\})?\s*\$?', r'\1', text)
     text = re.sub(r'\$([A-Za-z]+)\^\{?\*+\}?\s*([0-9\.\,]+)\^\{?\*+\}?\s*\$?', r'\1 $\2', text)
-    text = re.sub(r'\$\.?(?:\^\{?\*+\}?)?([0-9\.\,]+x?)(?:\^\{?\*+\}?)?\$?', r'\1', text)
-    text = re.sub(r'\$([A-Za-z0-9\.\,\%\+\-]+)\$', r'\1', text)
+    text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit)\{([^\}]*)\}', r'\1', text)
+    text = text.replace("\\times", "x").replace("\\approx", "~")
+    text = re.sub(r'\^\{\*+\}', '', text)
+    text = re.sub(r'\{\s*\}', '', text)
     text = text.replace("^{**}", "").replace("^{2}", "2").replace("^{3}", "3")
     text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
     text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
+    # Strip raw Markdown bold/italic/code delimiters for clean FPDF plain-text rendering
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    text = text.replace("**", "")
+    # Remove any stray '$' NOT followed by a digit (currency)
+    text = re.sub(r'\$(?![0-9])', '', text)
+    # Clean duplicated PEG phrasing if present
+    text = re.sub(r'\bWith\s+a\s+(PEG\s+ratio\s+of\s+[0-9\.]+)\s*,\s*\1\b', r'A \1', text, flags=re.IGNORECASE)
     text = re.sub(r'\bcanonical\b', 'verified', text, flags=re.IGNORECASE)
     text = re.sub(r'\bdouble-digit\s+scale\b(?=.*\$[1-9][0-9]{2}(?:\.[0-9]+)?B)', 'triple-digit billion-dollar scale', text, flags=re.IGNORECASE)
     text = re.sub(r'\bdouble-digit\s+scale\s*(?:of|at)?\s*\$([1-9][0-9]{2})', r'triple-digit billion-dollar scale of $\1', text, flags=re.IGNORECASE)

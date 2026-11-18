@@ -34,6 +34,64 @@ def classify_breaking_events(articles: List[Dict[str, str]]) -> Dict[str, List[s
         "commercial_milestones": commercial[:3]
     }
 
+def compute_sentiment_pulse(articles: List[Dict[str, str]], detected_events: Dict[str, List[str]]) -> Dict[str, str]:
+    """
+    Deterministically computes the baseline media sentiment tone from live headlines and detected catalysts.
+    Ensures cross-section tone alignment between Executive Summary and News Sentiment sections.
+    """
+    if not articles:
+        return {
+            "tone": "Neutral / Observant",
+            "polarity": "neutral",
+            "rationale": "Media coverage is sparse or balanced without major directional catalysts."
+        }
+
+    neg_pat = re.compile(
+        r'\b(resigns?|stepped down|scandal|fiasco|probe|investigation|inquiry|lawsuit|antitrust|'
+        r'sanctions?|export control|plunge[sd]?|drop[sp]?|slump[sd]?|tumble[sd]?|downgrade[sd]?|'
+        r'miss(?:es|ed)?|warning|concern[s]?|scrutiny|risk[s]?|ousted|volatility|bearish|sell-off)\b',
+        re.IGNORECASE
+    )
+    pos_pat = re.compile(
+        r'\b(beat[s]?|surge[sd]?|record|rally|rallies|upgrade[sd]?|outperform|breakthrough|'
+        r'partnership|launch(?:es|ed)?|strong demand|bullish|soar[sd]?|tops estimates|exceeds)\b',
+        re.IGNORECASE
+    )
+
+    neg_hits = 0
+    pos_hits = 0
+    for a in articles:
+        text = f"{a.get('title', '')} {a.get('snippet', '')}"
+        neg_hits += len(neg_pat.findall(text))
+        pos_hits += len(pos_pat.findall(text))
+
+    has_gov_shock = bool(detected_events.get("governance_events"))
+    has_reg_risk = bool(detected_events.get("regulatory_risks"))
+
+    if neg_hits >= pos_hits + 2 or (has_gov_shock and has_reg_risk and neg_hits >= pos_hits):
+        return {
+            "tone": "Bearish-to-Cautiously Observant",
+            "polarity": "cautious",
+            "rationale": "Media coverage highlights acute governance transitions, regulatory scrutiny, or headline volatility outweighing operational momentum."
+        }
+    elif has_gov_shock or has_reg_risk or neg_hits > pos_hits:
+        return {
+            "tone": "Mixed-to-Cautiously Observant",
+            "polarity": "cautious",
+            "rationale": "Institutional coverage balances commercial execution against active governance or regulatory risk overhangs."
+        }
+    elif pos_hits > neg_hits:
+        return {
+            "tone": "Constructive / Bullish",
+            "polarity": "positive",
+            "rationale": "Media narrative emphasizes commercial wins, product execution, and positive earnings momentum."
+        }
+    return {
+        "tone": "Balanced / Observant",
+        "polarity": "neutral",
+        "rationale": "Recent headlines reflect steady operational coverage without extreme directional skew."
+    }
+
 def get_company_news(company_name: str, symbol: str = "", max_results: int = 5) -> Dict[str, Any]:
     """
     Fetch verified breaking news for the exact target company.
@@ -121,13 +179,15 @@ def get_company_news(company_name: str, symbol: str = "", max_results: int = 5) 
             pass
 
     detected_events = classify_breaking_events(articles)
+    sentiment_pulse = compute_sentiment_pulse(articles, detected_events)
 
     return {
         "status": "success" if articles else "empty",
         "company": company_name,
         "count": len(articles),
         "articles": articles,
-        "detected_events": detected_events
+        "detected_events": detected_events,
+        "sentiment_pulse": sentiment_pulse
     }
 
 if __name__ == "__main__":

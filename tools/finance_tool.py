@@ -1,6 +1,9 @@
 import yfinance as yf
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
+import calendar
 import re
+from tools.schemas import FiscalCalendarContext, VerifiedOfficer, classify_role_category
 
 def normalize_name(name: str) -> str:
     """Normalize company name by stripping legal forms and punctuation for clean comparison."""
@@ -74,6 +77,126 @@ def get_peg_rationale(peg: Optional[float], fwd_pe: Optional[float]) -> str:
     elif peg is not None:
         return f"PEG ratio of {peg:.2f} reflects multiple valuation against Wall Street consensus multi-year EPS growth."
     return "PEG ratio reflects Forward P/E relative to consensus long-term earnings growth."
+
+KNOWN_FISCAL_YEAR_ENDS: Dict[str, int] = {
+    "NVDA": 1,   # Late January (e.g. FY2027 runs Feb 2026 - Jan 2027)
+    "WMT": 1,    # January 31
+    "CRM": 1,    # January 31
+    "TGT": 1,    # Late January
+    "DELL": 1,   # Late January
+    "MSFT": 6,   # June 30
+    "ORCL": 5,   # May 31
+    "AAPL": 9,   # Late September
+    "DIS": 9,    # Late September
+    "COST": 8,   # Late August
+    "ACN": 8,    # August 31
+    "ADBE": 11,  # Late November
+    "AVGO": 10,  # Late October
+    "TSLA": 12,  # December 31
+    "AMZN": 12,  # December 31
+    "GOOGL": 12, # December 31
+    "META": 12,  # December 31
+    "SYS.KA": 12 # December 31
+}
+
+def compute_fiscal_calendar_context(fy_end_month: int = 12, ref_date: Optional[datetime] = None) -> Dict[str, Any]:
+    """
+    Universal Fiscal Calendar Grounding Engine.
+    Deterministically translates any calendar date into the exact corporate fiscal year and quarter
+    for ANY public company (calendar-year or offset fiscal year such as Jan/Jun/Sep FY ends).
+    """
+    now = ref_date or datetime.now()
+    m = now.month
+    y = now.year
+    fy_end = max(1, min(12, int(fy_end_month or 12)))
+
+    fy_start_month = (fy_end % 12) + 1
+    is_cal = (fy_end == 12)
+
+    # Current Fiscal Year: if FY ends in Dec, FY == calendar year.
+    # For offset FYs (e.g. Jan FY end, starts Feb 2026 -> FY2027), months > fy_end belong to FY(y+1).
+    if is_cal:
+        current_fy = y
+    else:
+        current_fy = y + 1 if m > fy_end else y
+
+    # Months elapsed since start of current fiscal year (0..11)
+    months_since_start = (m - fy_start_month) % 12
+    current_q_num = (months_since_start // 3) + 1
+    current_q_str = f"Q{current_q_num} FY{current_fy}"
+
+    # Most recently completed / reported quarter
+    if current_q_num == 1:
+        prev_q_num = 4
+        prev_fy = current_fy - 1
+    else:
+        prev_q_num = current_q_num - 1
+        prev_fy = current_fy
+    prev_q_str = f"Q{prev_q_num} FY{prev_fy}"
+
+    # Build readable quarter calendar map for current_fy
+    def _month_abbr(mo: int) -> str:
+        return calendar.month_abbr[((mo - 1) % 12) + 1]
+
+    q_ranges = []
+    for q_idx in range(4):
+        s_mo = ((fy_start_month - 1 + q_idx * 3) % 12) + 1
+        e_mo = ((fy_start_month - 1 + q_idx * 3 + 2) % 12) + 1
+        q_ranges.append(f"Q{q_idx+1} FY{current_fy} ({_month_abbr(s_mo)}-{_month_abbr(e_mo)})")
+
+    prev_end_mo = ((fy_start_month - 1 + (prev_q_num - 1) * 3 + 2) % 12) + 1
+    prev_end_year = y if prev_end_mo <= m else y - 1
+    prev_end_label = f"{calendar.month_name[prev_end_mo]} {prev_end_year}"
+
+    fy_end_label = "December 31 (Calendar Year)" if is_cal else f"Late {calendar.month_name[fy_end]} (Non-Calendar Fiscal Year)"
+    summary = (
+        f"Fiscal year ends {fy_end_label}. "
+        f"Schedule: {', '.join(q_ranges)}. "
+        f"As of {calendar.month_name[m]} {y}, the company is in {current_q_str}; "
+        f"the most recently completed/reported earnings period is {prev_q_str} (ended {prev_end_label})."
+    )
+
+    ctx = FiscalCalendarContext(
+        fiscal_year_end_month=fy_end,
+        fiscal_year_end_label=fy_end_label,
+        is_calendar_year=is_cal,
+        current_fiscal_year=current_fy,
+        current_fiscal_quarter=current_q_str,
+        most_recent_reported_quarter=prev_q_str,
+        most_recent_quarter_end_label=prev_end_label,
+        quarter_mapping_summary=summary
+    )
+    return ctx.model_dump()
+
+def extract_sec_officers(info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Extract verified corporate officers directly from Yahoo Finance / SEC filing metadata (`companyOfficers`).
+    Validated via Pydantic VerifiedOfficer schema.
+    """
+    raw_officers = info.get("companyOfficers") or []
+    verified: List[Dict[str, Any]] = []
+    for item in raw_officers[:8]:
+        name = (item.get("name") or "").strip()
+        title = (item.get("title") or "").strip()
+        if not name or not title:
+            continue
+        # Only retain top C-suite / Board Chair roles
+        role_cat = classify_role_category(title)
+        if role_cat == "EXECUTIVE" and not any(k in title.lower() for k in ["chief", "chair", "president", "founder"]):
+            continue
+        try:
+            officer = VerifiedOfficer(
+                name=name,
+                title=title,
+                role_category=role_cat,
+                is_former=False,
+                source="SEC / Exchange Filing",
+                priority=2
+            )
+            verified.append(officer.model_dump())
+        except Exception:
+            continue
+    return verified
 
 OFFLINE_DEMO_PROFILES = {
     "NVDA": {
@@ -327,6 +450,17 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             target_mean_price = info.get("targetMeanPrice")
             recommendation = info.get("recommendationKey", "N/A")
 
+            # Universal Fiscal Year End detection (from SEC/Yahoo lastFiscalYearEnd timestamp)
+            fy_end_month = KNOWN_FISCAL_YEAR_ENDS.get(resolved_ticker, 12)
+            last_fy_ts = info.get("lastFiscalYearEnd") or info.get("nextFiscalYearEnd")
+            if isinstance(last_fy_ts, (int, float)) and last_fy_ts > 0:
+                try:
+                    fy_end_month = datetime.fromtimestamp(last_fy_ts, tz=timezone.utc).month
+                except Exception:
+                    pass
+            fiscal_calendar = compute_fiscal_calendar_context(fy_end_month)
+            sec_officers = extract_sec_officers(info)
+
             gross_pct = f"{gross_margins * 100:.2f}%" if gross_margins is not None else "N/A"
             op_pct = f"{operating_margins * 100:.2f}%" if operating_margins is not None else "N/A"
             margin_pct = f"{profit_margins * 100:.2f}%" if profit_margins is not None else "N/A"
@@ -363,7 +497,9 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                         "profit_margins": margin_pct,
                         "revenue_growth_yoy": growth_pct,
                         "analyst_target_price": f"{target_mean_price:.2f} {currency}" if target_mean_price else "N/A",
-                        "analyst_rating": recommendation.upper() if recommendation else "N/A"
+                        "analyst_rating": recommendation.upper() if recommendation else "N/A",
+                        "fiscal_calendar": fiscal_calendar,
+                        "sec_officers": sec_officers
                     }
                 }
         except Exception:
@@ -371,10 +507,14 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
 
         # If live API failed (e.g. 403 / network timeout), fallback to verified public profile
         if resolved_ticker in OFFLINE_DEMO_PROFILES:
+            profile_copy = dict(OFFLINE_DEMO_PROFILES[resolved_ticker])
+            fy_end_month = KNOWN_FISCAL_YEAR_ENDS.get(resolved_ticker, 12)
+            profile_copy["fiscal_calendar"] = compute_fiscal_calendar_context(fy_end_month)
+            profile_copy.setdefault("sec_officers", [])
             return {
                 "status": "success",
                 "is_public": True,
-                "data": OFFLINE_DEMO_PROFILES[resolved_ticker]
+                "data": profile_copy
             }
 
     # If unlisted / private or no exact public stock found

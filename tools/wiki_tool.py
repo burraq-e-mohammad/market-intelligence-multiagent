@@ -3,6 +3,7 @@ import requests
 import xml.etree.ElementTree as ET
 import re
 from typing import Dict, Any, List
+from tools.schemas import VerifiedOfficer, classify_role_category, parse_officer_string, reconcile_officers
 
 VERIFIED_CORPORATE_REGISTRY = {
     "nvidia": {
@@ -354,37 +355,144 @@ def fetch_verified_media_profile(company_name: str) -> Dict[str, Any]:
         "entity_profile": profile
     }
 
+def fetch_wikipedia_infobox_officers(page_title: str) -> List[VerifiedOfficer]:
+    """
+    Fetch ONLY the Wikipedia Infobox (`key_people` field from section 0 wikitext).
+    Prevents body-text co-occurrence hallucinations (e.g. scraping the CEO of Denny's
+    or a third-party scandal company mentioned in historical/controversy paragraphs).
+    """
+    officers: List[VerifiedOfficer] = []
+    try:
+        r = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "prop": "revisions",
+                "rvprop": "content",
+                "rvsection": "0",
+                "titles": page_title,
+                "format": "json"
+            },
+            headers={"User-Agent": "MarketIntelAgent/2.0 (contact@example.com)"},
+            timeout=5
+        )
+        if r.status_code != 200:
+            return []
+        pages = r.json().get("query", {}).get("pages", {})
+        wikitext = ""
+        for pdata in pages.values():
+            revs = pdata.get("revisions", [])
+            if revs:
+                wikitext = revs[0].get("*", "") or revs[0].get("slots", {}).get("main", {}).get("*", "")
+                break
+        if not wikitext:
+            return []
+
+        # Extract the `| key_people = ...` block up to the next infobox parameter `| param =`
+        m = re.search(r'\|\s*key_people\s*=\s*(.*?)(?=\n\|\s*[a-zA-Z_]+\s*=|\n\}\})', wikitext, re.DOTALL | re.IGNORECASE)
+        if not m:
+            return []
+        kp_block = m.group(1)
+        # Clean wiki markup: [[Target|Display]] -> Display, [[Name]] -> Name, remove <ref>...</ref>, templates
+        kp_block = re.sub(r'<ref[^>]*>.*?</ref>', '', kp_block, flags=re.DOTALL | re.IGNORECASE)
+        kp_block = re.sub(r'<ref[^/]*/>', '', kp_block, flags=re.IGNORECASE)
+        kp_block = re.sub(r'\[\[[^\|\]]+\|([^\]]+)\]\]', r'\1', kp_block)
+        kp_block = re.sub(r'\[\[([^\]]+)\]\]', r'\1', kp_block)
+        kp_block = re.sub(r'\{\{(?:ubl|unbulleted list|plainlist|hlist|nowrap)\|?', '\n', kp_block, flags=re.IGNORECASE)
+        kp_block = re.sub(r'\{\{[^\}]*\}\}', '', kp_block)
+        kp_block = re.sub(r'<br\s*/?>', '\n', kp_block, flags=re.IGNORECASE)
+        kp_block = kp_block.replace("'''", "").replace("''", "")
+
+        for raw_line in re.split(r'[\n\|]+', kp_block):
+            line = raw_line.strip(" *•-\t")
+            if not line or len(line) < 5:
+                continue
+            # Typical Infobox format: "Colette Kress (interim CEO and CFO)" or "Satya Nadella (chairman and CEO)"
+            pm = re.match(r'^([A-Z][A-Za-z\.\-\s]{2,45}?)\s*\(([^\)]{2,80})\)', line)
+            if pm:
+                cand_name, cand_title = pm.group(1).strip(), pm.group(2).strip()
+                if any(f in cand_title.lower() for f in ["former", "ex-", "resigned", "retired", "emeritus"]):
+                    continue
+                try:
+                    officers.append(
+                        VerifiedOfficer(
+                            name=cand_name,
+                            title=cand_title,
+                            role_category=classify_role_category(cand_title),
+                            is_former=False,
+                            source="Wikipedia Infobox",
+                            priority=3
+                        )
+                    )
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return officers
+
 def extract_structured_entity_profile(page_title: str, summary: str, body: str) -> Dict[str, Any]:
     """
     Dynamically extracts verified corporate attributes from Wikipedia content for ANY entity:
-    - Key executive leadership (CEO, Chairman, Founders, Presidents)
+    - Key executive leadership via strict Infobox parsing & Pydantic role-binding (NEVER naive body regexes)
     - Verified operating segments and product lines
     - Major historical M&A / acquisitions with closing dates and deal values
     """
     text = f"{summary}\n\n{body}"
     
-    # 1. Extract Founders & Origins
-    founding_matches = re.findall(r'(?:founded|established)\s+(?:in|on)\s+([0-9]{4})(?:\s+by\s+([^,\.\n]+(?:,\s*[^,\.\n]+)*))?', text, re.IGNORECASE)
+    # 1. Extract Founders & Origins (lead summary preferred)
+    founding_matches = re.findall(r'(?:founded|established)\s+(?:in|on)\s+([0-9]{4})(?:\s+by\s+([^,\.\n]+(?:,\s*[^,\.\n]+)*))?', summary or text, re.IGNORECASE)
     founding_info = ""
     if founding_matches:
         year, founders = founding_matches[0]
         founding_info = f"Founded in {year}" + (f" by {founders.strip()}" if founders else "")
         
-    # 2. Extract Leadership & Officers
-    leadership = []
-    officer_patterns = [
-        r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s*(?:,\s*|\s+is\s+|\s+as\s+)(?:the\s+)?(Chief Executive Officer|CEO|Interim CEO|Chair(?:man)? of the Board|President|Chief Financial Officer|CFO)',
-        r'(Chief Executive Officer|CEO|Interim CEO|Chair(?:man)?|President)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)'
-    ]
-    seen_names = set()
-    for pat in officer_patterns:
-        for m in re.finditer(pat, text):
-            g1, g2 = m.groups()
-            name, title = (g1, g2) if " " in g1 else (g2, g1)
-            clean_name = name.strip()
-            if clean_name not in seen_names and len(clean_name.split()) in [2, 3]:
-                seen_names.add(clean_name)
-                leadership.append(f"{clean_name} ({title.strip()})")
+    # 2. Extract Leadership & Officers STRICTLY from Infobox first (never random body paragraphs!)
+    officer_candidates: List[VerifiedOfficer] = fetch_wikipedia_infobox_officers(page_title)
+
+    # Fallback ONLY if Infobox returned nothing: scan lead summary sentences with strict context filters
+    if not officer_candidates and summary:
+        title_alt = r'(Interim\s+CEO|Interim\s+Chief\s+Executive\s+Officer|Chief\s+Executive\s+Officer|CEO|Chair(?:man)?\s+of\s+the\s+Board|Chief\s+Financial\s+Officer|CFO)'
+        lead_patterns = [
+            rf'([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+)\s*(?:,\s*(?:the\s+)?|\s+is\s+(?:the\s+)?){title_alt}',
+            rf'{title_alt}\s+([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+)'
+        ]
+        # Disqualifying context terms inside the sentence (former/external entities/scandals)
+        disqualify_ctx = [
+            "former", "resigned", "stepped down", "previously", "ex-ceo", "succeeded",
+            "diner", "denny's", "restaurant", "scandal", "investigation", "subsidiary",
+            "rival", "competitor", "partner"
+        ]
+        for sentence in re.split(r'(?<=[\.\!\?])\s+', summary):
+            s_lower = sentence.lower()
+            if any(dq in s_lower for dq in disqualify_ctx):
+                continue
+            for pat in lead_patterns:
+                for m in re.finditer(pat, sentence):
+                    g1, g2 = m.groups()
+                    if re.search(r'(?:CEO|Chief|Chair|CFO)', g1, re.IGNORECASE):
+                        title, name = g1.strip(), g2.strip()
+                    else:
+                        name, title = g1.strip(), g2.strip()
+                    # Reject possessive third-party titles like "Denny's CEO Kelli Valade"
+                    before_match = sentence[:m.start()].strip()
+                    if before_match.endswith("'s") or before_match.endswith("’s"):
+                        continue
+                    try:
+                        officer_candidates.append(
+                            VerifiedOfficer(
+                                name=name,
+                                title=title,
+                                role_category=classify_role_category(title),
+                                is_former=False,
+                                source="Wikipedia Summary",
+                                priority=4
+                            )
+                        )
+                    except Exception:
+                        continue
+
+    reconciled_officers = reconcile_officers(officer_candidates)
+    leadership = [o.formatted() for o in reconciled_officers]
 
     # 3. Extract Major Acquisitions with dates and values
     acquisitions = []
@@ -408,6 +516,7 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
 
     return {
         "founding_info": founding_info,
+        "active_officers": [o.model_dump() for o in reconciled_officers],
         "verified_leadership": leadership[:6],
         "verified_acquisitions": acquisitions[:6],
         "verified_segments": segments[:6]
@@ -487,6 +596,14 @@ def get_company_biography(company_name: str) -> Dict[str, Any]:
         except Exception:
             pass
             
+    # Helper to find authoritative registry match if present
+    norm_name = company_name.lower().strip()
+    reg_match = None
+    for reg_key, reg_data in VERIFIED_CORPORATE_REGISTRY.items():
+        if reg_key == norm_name or reg_key in norm_name or norm_name in reg_key:
+            reg_match = reg_data
+            break
+
     # If valid Wikipedia corporate page found
     if page and page.exists():
         summary = page.summary.strip()
@@ -495,6 +612,32 @@ def get_company_biography(company_name: str) -> Dict[str, Any]:
         
         profile = extract_structured_entity_profile(page.title, summary, detailed_body)
         
+        # Reconcile extracted profile with authoritative registry if matched (prevents stale/noisy overrides)
+        if reg_match:
+            reg_prof = reg_match.get("entity_profile", {})
+            reg_officers = []
+            for raw_off in reg_prof.get("verified_leadership", []):
+                parsed = parse_officer_string(raw_off, source="Authoritative Registry", priority=1)
+                if parsed:
+                    reg_officers.append(parsed)
+            wiki_officers = [VerifiedOfficer(**o) for o in profile.get("active_officers", [])]
+            merged_officers = reconcile_officers(
+                reg_officers + wiki_officers,
+                breaking_governance=reg_prof.get("breaking_governance", [])
+            )
+            profile["active_officers"] = [o.model_dump() for o in merged_officers]
+            profile["verified_leadership"] = [o.formatted() for o in merged_officers]
+            if reg_prof.get("verified_segments"):
+                profile["verified_segments"] = reg_prof["verified_segments"]
+            if reg_prof.get("verified_acquisitions"):
+                profile["verified_acquisitions"] = reg_prof["verified_acquisitions"]
+            if reg_prof.get("breaking_governance"):
+                profile["breaking_governance"] = reg_prof["breaking_governance"]
+            if reg_prof.get("breaking_regulatory"):
+                profile["breaking_regulatory"] = reg_prof["breaking_regulatory"]
+            if reg_prof.get("founding_info") and not profile.get("founding_info"):
+                profile["founding_info"] = reg_prof["founding_info"]
+
         return {
             "status": "success",
             "source": "Wikipedia",
@@ -506,18 +649,16 @@ def get_company_biography(company_name: str) -> Dict[str, Any]:
         }
 
     # If Wikipedia lookup didn't succeed (offline sandbox, rate limit, or not listed), check authoritative registry
-    norm_name = company_name.lower().strip()
-    for reg_key, reg_data in VERIFIED_CORPORATE_REGISTRY.items():
-        if reg_key == norm_name or reg_key in norm_name or norm_name in reg_key:
-            return {
-                "status": "success",
-                "source": "Authoritative Corporate Registry",
-                "company": reg_data["company"],
-                "url": reg_data["url"],
-                "summary": reg_data["summary"],
-                "detailed_content": f"## Corporate Overview\n{reg_data['summary']}\n\n## Official Business Architecture\n" + "\n".join([f"### {seg}" for seg in reg_data["entity_profile"].get("verified_segments", [])]),
-                "entity_profile": reg_data["entity_profile"]
-            }
+    if reg_match:
+        return {
+            "status": "success",
+            "source": "Authoritative Corporate Registry",
+            "company": reg_match["company"],
+            "url": reg_match["url"],
+            "summary": reg_match["summary"],
+            "detailed_content": f"## Corporate Overview\n{reg_match['summary']}\n\n## Official Business Architecture\n" + "\n".join([f"### {seg}" for seg in reg_match["entity_profile"].get("verified_segments", [])]),
+            "entity_profile": reg_match["entity_profile"]
+        }
 
     # Fallback for emerging or private enterprises not yet on Wikipedia (e.g., 10Pearls, JazzWorld, Emumba)
     return fetch_verified_media_profile(company_name)

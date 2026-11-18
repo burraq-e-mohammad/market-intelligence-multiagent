@@ -64,6 +64,29 @@ class QualityAssuranceAgent:
                 )
                 dossier["strategic_outlook"] = outlook + reg_block
 
+        # 4. Cross-Section Sentiment Alignment (Executive Summary vs News Sentiment Pulse)
+        sentiment_pulse = shared_state.get("sentiment_pulse") or {}
+        news_text_low = (dossier.get("recent_news_analysis") or "").lower()
+        tone_label = sentiment_pulse.get("tone", "")
+        is_cautious_or_bearish = (
+            sentiment_pulse.get("polarity") == "cautious"
+            or any(p in news_text_low for p in ["bearish-to-cautious", "bearish to cautious", "bearish-to-cautiously observant", "predominantly bearish", "cautiously observant"])
+        )
+        if is_cautious_or_bearish and dossier.get("executive_summary"):
+            aligned_label = tone_label.lower() if tone_label else "cautiously observant"
+            exec_txt = dossier["executive_summary"]
+            exec_txt = re.sub(
+                r'\bInstitutional\s+sentiment\s+remains\s+constructive\b',
+                f'Institutional and media sentiment remains {aligned_label}',
+                exec_txt, flags=re.IGNORECASE
+            )
+            exec_txt = re.sub(
+                r'\bMarket\s+sentiment\s+(?:is|remains)\s+(?:overwhelmingly\s+|predominantly\s+)?(?:constructive|bullish)\b',
+                f'Market sentiment remains {aligned_label}',
+                exec_txt, flags=re.IGNORECASE
+            )
+            dossier["executive_summary"] = exec_txt
+
         return dossier
 
     def _sanitize_section(self, text: str, section_name: str, shared_state: Dict[str, Any]) -> str:
@@ -75,23 +98,69 @@ class QualityAssuranceAgent:
         verified_leadership = shared_state.get("verified_leadership", [])
         verified_acquisitions = shared_state.get("verified_acquisitions", [])
         verified_segments = shared_state.get("verified_segments", [])
+        fiscal_cal = shared_state.get("fiscal_calendar") or metrics.get("fiscal_calendar") or {}
 
         # A. Common Executive Name Typo Corrections (Generic)
         text = re.sub(r'\bJenson\s+Huang\b', 'Jensen Huang', text)
         text = re.sub(r'\bJenson\b', 'Jensen', text)
 
-        # B. Clean raw LaTeX / Math artifacts & bleed
+        # B. Comprehensive Post-Processing LaTeX / Math Artifact Stripper
+        # Clean patterns like ${}^{**}9.72x^{**}$, $P/E^{**}$, $At^{**}154.71^{**}$, $Al^{**}$ while preserving currency like $154.71
+        text = re.sub(r'\$\s*\{\s*\}\s*\^\{\*+\}\s*([^\$\n]+?)\s*(?:\^\{\*+\})?\s*\$', r'\1', text)
+        text = re.sub(r'\{\s*\}\s*\^\{\*+\}\s*([^\s\$\n]+?)\s*(?:\^\{\*+\})?', r'\1', text)
         text = re.sub(r'\$\s*At\^?\{?\*+\}?\s*([0-9\.\,]+)\^?\{?\*+\}?\s*\$?', r'At $\1', text)
         text = re.sub(r'\$At\^\{\*\*\}', 'At $', text)
         text = re.sub(r'\$Al\^\{\*\*\}', 'AI', text)
         text = re.sub(r'\$AI\^\{\*\*\}', 'AI', text)
         text = re.sub(r'\$Al\$', 'AI', text)
+        # Strip $TOKEN^{**}$ or $P/E^{**}$ or $EPS$
+        text = re.sub(r'\$([A-Za-z][A-Za-z0-9/\-\s]{0,20}?)(?:\^\{\*+\})?\$', r'\1', text)
+        # Strip $9.72x$, $48.9%$, $.^{**}19.07x^{**}$
+        text = re.sub(r'\$\.?(?:\^\{\*+\})?\s*([0-9\.\,]+[xX%])(?:\^\{\*+\})?\s*\$?', r'\1', text)
+        # Strip $word^{**}154.71^{**}$ -> word $154.71
         text = re.sub(r'\$([A-Za-z]+)\^\{?\*+\}?\s*([0-9\.\,]+)\^\{?\*+\}?\s*\$?', r'\1 $\2', text)
-        text = re.sub(r'\$\.?(?:\^\{?\*+\}?)?([0-9\.\,]+x?)(?:\^\{?\*+\}?)?\$?', r'\1', text)
-        text = re.sub(r'\$([A-Za-z0-9\.\,\%\+\-]+)\$', r'\1', text)
+        # Strip general LaTeX commands and leftover superscripts/empty braces
+        text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit)\{([^\}]*)\}', r'\1', text)
+        text = text.replace("\\times", "x").replace("\\approx", "~")
+        text = re.sub(r'\^\{\*+\}', '', text)
+        text = re.sub(r'\{\s*\}', '', text)
         text = text.replace("^{**}", "").replace("^{2}", "2").replace("^{3}", "3")
         text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
         text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
+
+        # B2. Duplicated Phrasing Sanitizer (e.g. "With a PEG ratio of 0.20, PEG ratio of 0.20 reflects...")
+        text = re.sub(
+            r'\bWith\s+a\s+(PEG\s+ratio\s+of\s+[0-9\.]+)\s*,\s*\1\b',
+            r'A \1',
+            text, flags=re.IGNORECASE
+        )
+        text = re.sub(
+            r'\b(PEG\s+ratio\s+of\s+[0-9\.]+)\s*,?\s*\1\b',
+            r'\1',
+            text, flags=re.IGNORECASE
+        )
+        text = re.sub(r'\bA\s+A\s+PEG\s+ratio\b', 'A PEG ratio', text, flags=re.IGNORECASE)
+
+        # B3. Universal Non-Calendar Fiscal Quarter Grounding Validator
+        # If the company operates on an offset fiscal year (e.g. Jan FY-end -> Nov 2026 release is Q3 FY2027, NOT Q4-2026),
+        # reconcile mislabeled calendar-quarter earnings references dynamically.
+        if fiscal_cal and not fiscal_cal.get("is_calendar_year", True):
+            recent_q = fiscal_cal.get("most_recent_reported_quarter", "")
+            cur_fy = fiscal_cal.get("current_fiscal_year")
+            if recent_q and cur_fy:
+                # Calendar year behind fiscal year (e.g. 2026 when FY is 2027)
+                cal_year = cur_fy - 1
+                # Catch mislabeled calendar Q4-2026 / Q4 2026 earnings release when reporting Q3 FY2027
+                text = re.sub(
+                    rf'\bQ4[\-\s]+{cal_year}\s+(earnings|results|release|report|guidance)\b',
+                    rf'{recent_q} \1',
+                    text, flags=re.IGNORECASE
+                )
+                text = re.sub(
+                    rf'\bQ4[\-\s]+{cal_year}\b(?=\s*\((?:earnings|results|nov|november))',
+                    recent_q,
+                    text, flags=re.IGNORECASE
+                )
 
         # C. Eliminate prompt leakage and meta words universally
         text = re.sub(

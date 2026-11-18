@@ -34,7 +34,10 @@ UNIVERSAL FACTUAL & TEMPORAL RULES:
         verified_leadership = entity_profile.get("verified_leadership", [])
         verified_acquisitions = entity_profile.get("verified_acquisitions", [])
         verified_segments = entity_profile.get("verified_segments", [])
-        breaking_gov = shared_state.get("breaking_governance", []) if shared_state else []
+        breaking_gov = list(dict.fromkeys(
+            (entity_profile.get("breaking_governance") or []) +
+            ((shared_state.get("breaking_governance") or []) if shared_state else [])
+        ))
 
         prompt = f"""You are the Chief Corporate Historian & Strategic Enterprise Analyst.
 Synthesize an authoritative, comprehensive corporate biography for {company_name} based on verified intelligence:

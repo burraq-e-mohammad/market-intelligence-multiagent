@@ -5,7 +5,8 @@ from agents.biography_agent import BiographyAgent
 from agents.qa_critic import QualityAssuranceAgent
 from tools.finance_tool import get_financial_metrics
 from tools.pdf_tool import generate_pdf_report
-from typing import Dict, Any, Optional, Callable
+from tools.schemas import VerifiedOfficer, parse_officer_string, reconcile_officers
+from typing import Dict, Any, Optional, Callable, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import re
@@ -91,6 +92,8 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             "exchange": metrics.get("exchange", "Stock Exchange"),
             "sector": metrics.get("sector", "Technology & Services"),
             "industry": metrics.get("industry", "Enterprise Solutions"),
+            "fiscal_calendar": metrics.get("fiscal_calendar", {}),
+            "sec_officers": metrics.get("sec_officers", []),
             "temporal_year": 2026
         }
 
@@ -128,23 +131,58 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             news_data = f_news.result()
             bio_data = f_bio.result()
 
-        # Step 3: Dynamic Multi-Agent Intelligence Synthesis
+        # Step 3: Dynamic Multi-Agent Intelligence Synthesis & Strict Role-Binding Reconciliation
         entity_profile = bio_data.get("entity_profile", {})
         detected_events = news_data.get("detected_events", {})
+        sentiment_pulse = news_data.get("sentiment_pulse", {
+            "tone": "Balanced / Observant",
+            "polarity": "neutral",
+            "rationale": "Media coverage reflects active operational monitoring."
+        })
 
         founding_info = entity_profile.get("founding_info", "")
-        verified_leadership = entity_profile.get("verified_leadership", [])
         verified_acquisitions = entity_profile.get("verified_acquisitions", [])
         verified_segments = entity_profile.get("verified_segments", [])
-        breaking_gov = detected_events.get("governance_events", [])
-        breaking_reg = detected_events.get("regulatory_risks", [])
+
+        # Combine governance & regulatory events from both entity_profile and live News Scout
+        breaking_gov = list(dict.fromkeys(
+            (entity_profile.get("breaking_governance") or []) +
+            (detected_events.get("governance_events") or [])
+        ))
+        breaking_reg = list(dict.fromkeys(
+            (entity_profile.get("breaking_regulatory") or []) +
+            (detected_events.get("regulatory_risks") or [])
+        ))
+
+        # Reconcile officers strictly across SEC/Yahoo, Wikipedia/Registry, and breaking governance disclosures
+        officer_candidates: List[VerifiedOfficer] = []
+        for raw_off in (entity_profile.get("active_officers") or []):
+            try:
+                officer_candidates.append(VerifiedOfficer(**raw_off))
+            except Exception:
+                pass
+        if not officer_candidates:
+            for raw_str in (entity_profile.get("verified_leadership") or []):
+                parsed = parse_officer_string(raw_str, source="Verified Profile", priority=2)
+                if parsed:
+                    officer_candidates.append(parsed)
+        for sec_off in (shared_state.get("sec_officers") or []):
+            try:
+                officer_candidates.append(VerifiedOfficer(**sec_off))
+            except Exception:
+                pass
+
+        reconciled_officers = reconcile_officers(officer_candidates, breaking_governance=breaking_gov)
+        verified_leadership = [o.formatted() for o in reconciled_officers]
 
         shared_state["founding_info"] = founding_info
+        shared_state["active_officers"] = [o.model_dump() for o in reconciled_officers]
         shared_state["verified_leadership"] = verified_leadership
         shared_state["verified_acquisitions"] = verified_acquisitions
         shared_state["verified_segments"] = verified_segments
         shared_state["breaking_governance"] = breaking_gov
         shared_state["breaking_regulatory"] = breaking_reg
+        shared_state["sentiment_pulse"] = sentiment_pulse
 
         print(f"\n[Parent Agent: {self.name}] Synthesizing multi-agent intelligence streams...")
         cfg = config.get_config()
@@ -152,6 +190,11 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         
         scale_desc = metrics.get('revenue_scale_descriptor', 'Commercial Scale')
         peg_context = metrics.get('peg_rationale', '')
+        fiscal_cal = shared_state.get("fiscal_calendar") or {}
+        fiscal_summary = fiscal_cal.get("quarter_mapping_summary", "Standard calendar fiscal year.")
+        recent_q = fiscal_cal.get("most_recent_reported_quarter", "")
+        sentiment_tone = sentiment_pulse.get("tone", "Balanced / Observant")
+        sentiment_rationale = sentiment_pulse.get("rationale", "")
 
         synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Public Entity: {is_public}).
 
@@ -162,31 +205,33 @@ VERIFIED STATE (SINGLE SOURCE OF TRUTH):
 - Trailing P/E: {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))} | Forward P/E: {metrics.get('forward_pe', 'N/A')} | PEG Ratio: {metrics.get('peg_ratio', 'N/A')}
 - TTM Revenue (Trailing 12 Months): {metrics.get('total_revenue', 'N/A')} ({scale_desc}; do NOT confuse with annual FY filings)
 - Operating Margin: {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))} | Profit Margin: {metrics.get('profit_margins', 'N/A')}
-- Temporal Anchor: Current calendar year is 2026.
+- Fiscal Calendar Grounding: {fiscal_summary}
 
 DYNAMIC CORPORATE PROFILE & REAL-TIME CATALYSTS:
 - Founding & Origins: {founding_info if founding_info else 'Documented corporate founding'}
-- Verified Leadership & Officers: {", ".join(verified_leadership) if verified_leadership else 'Documented executive leadership'}
+- Verified Active Leadership & Officers (STRICTLY BOUND): {", ".join(verified_leadership) if verified_leadership else 'Documented executive leadership'}
 - Breaking Governance Shifts: {"; ".join(breaking_gov) if breaking_gov else 'Standard executive continuity'}
 - Critical Regulatory Inquiries & Compliance: {"; ".join(breaking_reg) if breaking_reg else 'Standard regulatory trade compliance'}
 - Official Reporting Segments & Products: {", ".join(verified_segments) if verified_segments else 'Documented core operating divisions'}
 - Documented Strategic Acquisitions: {"; ".join(verified_acquisitions) if verified_acquisitions else 'Documented M&A filings'}
+- Verified Media & Market Sentiment Pulse: {sentiment_tone} ({sentiment_rationale})
 - PEG Valuation Rationale: {peg_context}
 
 UNIVERSAL FACTUAL & CONTRADICTION PREVENTION DIRECTIVES:
 1. Under NO circumstances state or quote a share price, multiple, or market cap that contradicts the Verified State above.
-2. Executive Governance: Detail leadership strictly based on verified officers and breaking transitions above. Never hallucinate unverified titles (e.g. do not invent a COO if none is documented).
-3. Business Architecture: Structure divisions strictly around the company's verified reporting units and products above.
-4. Strategic Risks: Explicitly evaluate any breaking regulatory investigations, compliance scrutiny, or trade inquiries identified above.
-5. Temporal Anchor: Current calendar year is 2026. Do NOT report legacy multi-year-old architectures as upcoming catalysts.
-6. NEGATIVE CONSTRAINT: NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt' in your output text.
-7. Do NOT leave any dangling headers or unfinished sentences.
+2. STRICT ROLE-BINDING: Name ONLY the Verified Active Leadership & Officers above. NEVER attribute the CEO title to executives of unrelated companies or former/resigned officers, and never invent an undocumented COO.
+3. FISCAL QUARTER GROUNDING: Strictly use the company's fiscal quarter labels (most recent reported quarter: {recent_q if recent_q else 'latest fiscal period'}). Never confuse calendar quarters with non-calendar fiscal quarters.
+4. SENTIMENT COHESION: Section 1 (Executive Summary) MUST match the Verified Media & Market Sentiment Pulse ({sentiment_tone}). NEVER describe sentiment as 'constructive' or 'bullish' if the verified media pulse is bearish, cautious, or mixed!
+5. Business Architecture: Structure divisions strictly around the company's verified reporting units and products above.
+6. Strategic Risks: Explicitly evaluate any breaking regulatory investigations, compliance scrutiny, or trade inquiries identified above.
+7. FORMATTING & NEGATIVE CONSTRAINT: NEVER use LaTeX math delimiters ($...$, ^{{**}}, {{}}) around text or ratios (use $ ONLY for currency figures like $154.71). NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt'. Never repeat phrases like 'With a PEG ratio of X, PEG ratio of X'.
+8. Do NOT leave any dangling headers or unfinished sentences.
 
 Section 1: EXECUTIVE_SUMMARY
 - Macro Enterprise Standing & Industry Positioning
 - Core Commercial Drivers & Operational Scale
 - Financial & Valuation Synthesis
-- Sentiment & Event Integration
+- Sentiment & Event Integration (Aligned with {sentiment_tone})
 
 Section 2: STRATEGIC_OUTLOOK
 - Primary Long-Term Growth Vectors
@@ -218,10 +263,20 @@ STRATEGIC_OUTLOOK:
             exec_summary = parts[0].replace("EXECUTIVE_SUMMARY:", "").strip()
             strategic_outlook = parts[1].strip()
         else:
-            # Dynamic fallback based on real facts & extracted profile
+            # Dynamic fallback based on real facts, reconciled officers, and aligned sentiment tone
             if is_public:
-                gov_str = f"In corporate governance, recent key developments include: {'; '.join(breaking_gov)}." if breaking_gov else (f"Executive leadership is stewarded by core officers: {', '.join(verified_leadership)}." if verified_leadership else "")
-                
+                if breaking_gov and verified_leadership:
+                    gov_str = f"In corporate governance, active leadership is currently stewarded by {', '.join(verified_leadership)}; key developments include: {'; '.join(breaking_gov)}."
+                elif breaking_gov:
+                    gov_str = f"In corporate governance, recent key developments include: {'; '.join(breaking_gov)}."
+                elif verified_leadership:
+                    gov_str = f"Executive leadership is stewarded by verified active officers: {', '.join(verified_leadership)}."
+                else:
+                    gov_str = ""
+
+                peg_sentence = f"A {peg_context} " if peg_context else f"The equity trades at a PEG ratio of {metrics.get('peg_ratio', 'N/A')}. "
+                sentiment_sentence = f"Institutional and media sentiment is currently {sentiment_tone.lower()}. {sentiment_rationale} "
+
                 exec_summary = (
                     f"### Macro Standing & Corporate Scale\n"
                     f"{company_name} ({ticker}) stands as a prominent public enterprise operating within the {metrics.get('sector', 'Technology')} sector, "
@@ -229,10 +284,10 @@ STRATEGIC_OUTLOOK:
                     f"The organization commands an extensive commercial footprint, serving institutional and enterprise client bases across primary global markets.\n\n"
                     f"### Financial Architecture & Valuation Context\n"
                     f"From a fundamental valuation perspective, the equity trades at {metrics.get('current_price', 'N/A')} against a trailing P/E multiple of {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))} and a forward P/E of {metrics.get('forward_pe', 'N/A')}. "
-                    f"With a PEG ratio of {metrics.get('peg_ratio', 'N/A')}, {peg_context} "
+                    f"{peg_sentence}"
                     f"Trading over the past 52 weeks spans {metrics.get('52_week_low', 'N/A')} to {metrics.get('52_week_high', 'N/A')}, supported by {scale_desc} TTM revenue volumes of {metrics.get('total_revenue', 'N/A')} and net margins of {metrics.get('profit_margins', 'N/A')}.\n\n"
                     f"### Commercial Execution & Market Sentiment\n"
-                    f"Institutional sentiment remains constructive, reinforced by commercial execution across core business units. "
+                    f"{sentiment_sentence}"
                     f"{gov_str}"
                 )
                 
