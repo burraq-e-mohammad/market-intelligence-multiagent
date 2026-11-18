@@ -31,9 +31,15 @@ CRITICAL ARITHMETIC, SCALE & FORMATTING RULES:
             metrics = tool_result.get("data", {})
 
         private_financials = (shared_state.get("private_financials") or {}) if shared_state else {}
-        deterministic_table = generate_deterministic_financial_table(metrics, private_financials=private_financials)
+        resolved_entity = (shared_state.get("resolved_entity") or {}) if shared_state else {}
+        entity_type = resolved_entity.get("entity_type") or ("PUBLIC" if is_public else "PRIVATE")
+        deterministic_table = generate_deterministic_financial_table(
+            metrics,
+            private_financials=private_financials,
+            resolved_entity=resolved_entity
+        )
 
-        if is_public:
+        if entity_type == "PUBLIC" and is_public:
             peg_val = metrics.get('peg_ratio', 'N/A')
             fwd_pe_val = metrics.get('forward_pe', 'N/A')
             rev_val = metrics.get('total_revenue', 'N/A')
@@ -94,6 +100,59 @@ Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_mar
                     f"Core fundamentals indicate operating margins of {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))} and net profit margins of {metrics.get('profit_margins')} "
                     f"against {scale_desc} TTM revenue volumes of {rev_val}. "
                     f"Wall Street sell-side consensus stands at {metrics.get('analyst_rating')} with a mean 12-month target of {metrics.get('analyst_target_price')}."
+                )
+        elif entity_type == "SUBSIDIARY":
+            kpis = resolved_entity.get("subsidiary_kpis") or {}
+            parent_co = resolved_entity.get("parent_company") or "Parent Holding Group"
+            ownership = resolved_entity.get("ownership_pct") or f"Wholly-owned subsidiary of {parent_co}"
+            legal_name = resolved_entity.get("legal_entity_name") or metrics.get("company_name")
+            currency = resolved_entity.get("local_currency") or "Local Currency"
+            hq = resolved_entity.get("headquarters") or "Regional Market"
+            parent_mkt = metrics.get("parent_metrics") or {}
+            parent_quote = (
+                f"{parent_mkt.get('symbol')} @ {parent_mkt.get('current_price')} (Market Cap: {parent_mkt.get('market_cap')})"
+                if parent_mkt.get("current_price") not in (None, "N/A") else f"Consolidated under {parent_co}"
+            )
+
+            prompt = f"""Analyze the financial profile, parent-subsidiary capital structure, and operational KPIs of {resolved_entity.get('canonical_name', metrics.get('company_name'))}, a WHOLLY-OWNED OPERATING SUBSIDIARY.
+
+VERIFIED SUBSIDIARY & PARENT-OWNERSHIP PROFILE:
+- Canonical Brand & Legal Entity: {resolved_entity.get('canonical_name')} | Legal Name: {legal_name}
+- Entity Classification: WHOLLY-OWNED OPERATING SUBSIDIARY (NOT a standalone public stock and NOT a venture-backed startup)
+- Parent Ownership: {ownership}
+- Parent Listed Equity Reference: {parent_quote}
+- Functional Currency & Market: {currency} ({hq}) | Sector: {resolved_entity.get('sector')}
+- Reporting Basis: {kpis.get('reporting_basis', f'Consolidated under {parent_co}')}
+- Reported Revenue ({currency}): {kpis.get('annual_revenue', f'Undisclosed standalone (Consolidated under {parent_co})')}
+- Reported EBITDA ({currency}): {kpis.get('ebitda', f'Undisclosed standalone (Consolidated under {parent_co})')}
+- Subscriber & Market-Share KPIs: {kpis.get('subscribers', 'Regional market operator')}
+- Digital & Platform Ecosystem KPIs: {kpis.get('digital_ecosystem', 'Core commercial infrastructure')}
+- Credit Rating & Capital Backing: {kpis.get('credit_rating', f'Backed by {parent_co}')}
+
+STRICT SUBSIDIARY GUARDRAILS (CRITICAL):
+1. ZERO VENTURE CAPITAL OR B2B SAAS BOILERPLATE: This is a wholly-owned operating subsidiary of a multinational corporate parent ({parent_co}). NEVER mention 'venture capital rounds', 'Series A/B/C', 'founder equity', or generic 'B2B SaaS recurring software contracts'!
+2. ZERO STANDALONE PUBLIC-EQUITY MULTIPLES: Do NOT fabricate a standalone stock price, Forward P/E, or PEG ratio for this unlisted subsidiary. Clearly distinguish subsidiary local-currency performance ({currency}) from parent-level consolidated equity ({parent_co}).
+3. TRANSPARENCY ON UNDISCLOSED STANDALONE METRICS: If standalone revenue or EBITDA is undisclosed (consolidated into parent filings), explicitly state 'Undisclosed standalone (Consolidated under {parent_co})' and analyze parent financial backing, local-currency operating dynamics, subscriber scale, ARPU/data monetization, and capex intensity.
+4. FORMATTING: Write currency figures cleanly without backslash escapes (e.g., PKR 456.6B or $460M, NEVER \\$460M). Never use LaTeX $...$ around text or ratios. Never use meta words like 'canonical', 'provided', or 'prompt'.
+
+Provide an in-depth 3-section evaluation:
+### 1. Parent-Subsidiary Ownership & Consolidated Capital Architecture
+### 2. Local-Currency Operating Scale, Revenue/EBITDA & Subscriber KPIs
+### 3. Capital Intensity, Credit Standing & FX / Regulatory Dynamics"""
+
+            llm_analysis = self.generate_response(prompt)
+            if "Report]" in llm_analysis:
+                llm_analysis = (
+                    f"### 1. Parent-Subsidiary Ownership & Consolidated Capital Architecture\n"
+                    f"{resolved_entity.get('canonical_name')} (legally {legal_name}) operates as a {ownership}, headquartered in {hq}. "
+                    f"Rather than maintaining a standalone stock exchange listing or relying on venture funding, the subsidiary's balance sheet, spectrum financing, and network capex are supported through {parent_co} ({parent_quote}).\n\n"
+                    f"### 2. Local-Currency Operating Scale, Revenue/EBITDA & Subscriber KPIs\n"
+                    f"Operating in {currency}, documented disclosures reflect: Revenue — {kpis.get('annual_revenue', f'Undisclosed standalone (Consolidated under {parent_co})')}; "
+                    f"EBITDA — {kpis.get('ebitda', f'Undisclosed standalone (Consolidated under {parent_co})')}. "
+                    f"Commercial scale is anchored by {kpis.get('subscribers', 'strong regional market share')} and digital ecosystem expansion spanning {kpis.get('digital_ecosystem', 'core digital services')}.\n\n"
+                    f"### 3. Capital Intensity, Credit Standing & FX / Regulatory Dynamics\n"
+                    f"Credit standing is anchored by {kpis.get('credit_rating', f'parent backing from {parent_co}')}. "
+                    f"Key financial sensitivities include {currency} foreign-exchange translation into parent reporting currency, spectrum renewal capex, energy/tower operating costs, and local regulatory taxation."
                 )
         else:
             pf_vals = private_financials.get("valuations", [])

@@ -222,6 +222,8 @@ def generate_pdf_report(
     ticker = sanitize_text(report_data.get("ticker", report_data.get("shared_state", {}).get("ticker", "PRIVATE / UNLISTED")))
     metrics = report_data.get("metrics", report_data.get("shared_state", {}).get("metrics", {}))
     is_public = report_data.get("is_public", report_data.get("shared_state", {}).get("is_public", True))
+    resolved_entity = report_data.get("resolved_entity") or report_data.get("shared_state", {}).get("resolved_entity") or {}
+    entity_type = report_data.get("entity_type") or resolved_entity.get("entity_type") or ("PUBLIC" if is_public else "PRIVATE")
     
     exec_summary = report_data.get("executive_summary") or report_data.get("synthesis", {}).get("executive_summary", "No executive summary provided.")
     corp_bg = report_data.get("corporate_background") or report_data.get("biography", {}).get("analysis", "No background available.")
@@ -234,20 +236,25 @@ def generate_pdf_report(
     pdf.add_page()
     
     # Title & Subheading
-    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_font("Helvetica", "B", 16)
     pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 10, f"{company} Comprehensive Briefing", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 10)
+    pdf.multi_cell(0, 8.5, f"{company} Comprehensive Briefing", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
     pdf.set_text_color(100, 116, 139)
     
-    if is_public:
-        pdf.cell(0, 5, sanitize_text(f"Status: Publicly Traded | Sector: {metrics.get('sector', 'N/A')} | Industry: {metrics.get('industry', 'N/A')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if entity_type == "PUBLIC" and is_public:
+        pdf.multi_cell(0, 5, sanitize_text(f"Status: Publicly Traded | Sector: {metrics.get('sector', 'N/A')} | Industry: {metrics.get('industry', 'N/A')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    elif entity_type == "SUBSIDIARY":
+        parent_co = resolved_entity.get("parent_company") or metrics.get("parent_company") or "Parent Holding Group"
+        hq = resolved_entity.get("headquarters") or metrics.get("headquarters") or "Regional Market"
+        sector = resolved_entity.get("sector") or metrics.get("sector") or "Telecommunications & Services"
+        pdf.multi_cell(0, 5, sanitize_text(f"Status: Wholly-Owned Operating Subsidiary | Parent: {parent_co} | HQ: {hq} | Sector: {sector}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     else:
-        pdf.cell(0, 5, sanitize_text("Status: Privately Held / Non-Public Enterprise | Unlisted Equity"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(0, 5, sanitize_text("Status: Privately Held / Non-Public Enterprise | Unlisted Equity"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(4)
     
     # Financial & Corporate Profile Dashboard Grid
-    if is_public:
+    if entity_type == "PUBLIC" and is_public:
         pdf.section_title("1. Financial Health & Valuation Snapshot (Public Equity)")
         kpis = [
             ("Stock Price", str(metrics.get("current_price", "N/A")), "Market Cap", str(metrics.get("market_cap", "N/A"))),
@@ -257,16 +264,32 @@ def generate_pdf_report(
             ("52-Wk Range", f"{metrics.get('52_week_low', 'N/A')} - {metrics.get('52_week_high', 'N/A')}", "YoY Growth", str(metrics.get("revenue_growth_yoy", "N/A"))),
             ("Analyst Target", str(metrics.get("analyst_target_price", "N/A")), "Consensus Rating", str(metrics.get("analyst_rating", "N/A")))
         ]
+    elif entity_type == "SUBSIDIARY":
+        pdf.section_title("1. Subsidiary Ownership & Operating Profile")
+        sub_kpis = resolved_entity.get("subsidiary_kpis") or metrics.get("subsidiary_kpis") or {}
+        parent_co = resolved_entity.get("parent_company") or metrics.get("parent_company") or "Parent Group"
+        legal_name = resolved_entity.get("legal_entity_name") or company
+        currency = resolved_entity.get("local_currency") or "Local"
+        hq = resolved_entity.get("headquarters") or "Regional"
+        rev_short = (sub_kpis.get("annual_revenue") or f"Consolidated under {parent_co}")[:34]
+        subs_short = (sub_kpis.get("subscribers") or "Regional Market Leader")[:34]
+        credit_short = (sub_kpis.get("credit_rating") or f"Backed by {parent_co}")[:34]
+        kpis = [
+            ("Entity Type", "Wholly-Owned Subsidiary", "Parent Company", parent_co[:34]),
+            ("Legal Entity", legal_name[:34], "Headquarters", hq[:34]),
+            ("Currency", f"{currency} (Consolidated)", "Reported Rev", rev_short),
+            ("Scale / Subs", subs_short, "Credit / Backing", credit_short)
+        ]
     else:
         pdf.section_title("1. Corporate Structure & Private Enterprise Profile")
         kpis = [
             ("Entity Type", "Privately Held Entity", "Trading Status", "Unlisted (No SEC Ticker)"),
-            ("Ownership", "Private / VC / Founder", "Reporting", "Exempt from SEC 10-K Filings"),
-            ("Capital Basis", "Private Investment Rounds", "Market Access", "Secondary / Direct Equity"),
+            ("Ownership", "Private / Strategic / Founder", "Reporting", "Exempt from SEC 10-K Filings"),
+            ("Capital Basis", "Private Financing Rounds", "Market Access", "Secondary / Direct Equity"),
             ("Primary Domain", "Technology & Services", "Financial Audit", "Private Corporate Books")
         ]
     
-    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_font("Helvetica", "B", 8.5)
     for row in kpis:
         pdf.set_fill_color(241, 245, 249)
         pdf.set_text_color(71, 85, 105)

@@ -2,7 +2,7 @@ import wikipediaapi
 import requests
 import xml.etree.ElementTree as ET
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from tools.schemas import VerifiedOfficer, classify_role_category, parse_officer_string, reconcile_officers
 
 VERIFIED_CORPORATE_REGISTRY = {
@@ -204,6 +204,58 @@ VERIFIED_CORPORATE_REGISTRY = {
             ],
             "breaking_regulatory": [
                 "Global semiconductor export-control compliance (US-China chip restrictions) and South Korean Fair Trade Commission (KFTC) oversight."
+            ]
+        }
+    },
+    "jazz": {
+        "company": "Jazz (JazzWorld Pakistan Limited / PMCL)",
+        "url": "https://en.wikipedia.org/wiki/Jazz_(mobile_network_operator)",
+        "summary": "Jazz (legally Pakistan Mobile Communications Limited / JazzWorld Pakistan Limited) is Pakistan's largest mobile network and digital operator, headquartered in Islamabad, Pakistan. Wholly owned by VEON Ltd. (NASDAQ: VEON), Jazz serves over 76 million cellular subscribers and operates Pakistan's leading fintech platform JazzCash alongside Tamasha OTT, Simosa, and Garaj Cloud.",
+        "entity_profile": {
+            "founding_info": "Founded in 1994 as Mobilink (Pakistan's pioneer GSM operator); merged with Warid Pakistan in 2016 and rebranded as Jazz under parent VEON Ltd.",
+            "verified_leadership": [
+                "Aamir Ibrahim (CEO)"
+            ],
+            "breaking_governance": [
+                "Wholly-owned subsidiary (100%) of VEON Ltd. (NASDAQ: VEON), led in Pakistan by CEO Aamir Ibrahim."
+            ],
+            "verified_acquisitions": [
+                "Warid Pakistan (merger closed 2016)",
+                "Mobilink Microfinance Bank (parent financial services arm powering JazzCash)"
+            ],
+            "verified_segments": [
+                "Core Telecom & 4G/5G Mobile Broadband Connectivity (~76M+ subscribers, ~37%+ market share)",
+                "JazzCash Digital Financial Services & Mobile Wallets (~19M+ MAUs, branchless banking leader)",
+                "Digital Entertainment & Super-App Ecosystem (Tamasha OTT, Simosa, FikrFree)",
+                "Jazz Business & Garaj Cloud (Enterprise Connectivity, IoT & Sovereign Cloud Infrastructure)"
+            ],
+            "breaking_regulatory": [
+                "Pakistan Telecommunication Authority (PTA) spectrum renewal/5G auction compliance, SBP digital banking oversight for JazzCash, and Pakistani telecom taxation/FX repatriation frameworks."
+            ]
+        }
+    },
+    "zong": {
+        "company": "Zong 4G (China Mobile Pakistan / CMPak)",
+        "url": "https://en.wikipedia.org/wiki/Zong_4G",
+        "summary": "Zong 4G (legally China Mobile Pakistan Limited / CMPak) is Pakistan's second-largest cellular network operator and a leading 4G mobile broadband provider, headquartered in Islamabad, Pakistan. It is a 100% wholly-owned overseas subsidiary of China Mobile Limited (SEHK: 0941.HK), established in 2007 through the acquisition of Paktel and launched under the Zong brand in 2008.",
+        "entity_profile": {
+            "founding_info": "Established in 2007 via China Mobile's acquisition of Paktel (Pakistan's first mobile operator, founded 1990) and launched commercially as Zong in 2008",
+            "verified_leadership": [
+                "Wang Hua (CEO & Chairman, CMPak)"
+            ],
+            "breaking_governance": [
+                "100% wholly-owned overseas subsidiary of China Mobile Limited (SEHK: 0941.HK)."
+            ],
+            "verified_acquisitions": [
+                "Paktel (acquired by China Mobile in 2007, $460M)"
+            ],
+            "verified_segments": [
+                "4G LTE & 5G-Ready Mobile Broadband Network (~50M+ subscribers, 15,000+ nationwide 4G towers)",
+                "Enterprise Solutions, M2M & IoT Connectivity (Corporate Data, Cloud & CPEC Infrastructure)",
+                "Digital Consumer Services & Fintech (My Zong App, PayMax Mobile Wallet, International Roaming)"
+            ],
+            "breaking_regulatory": [
+                "Pakistan Telecommunication Authority (PTA) spectrum licensing and 5G auction regulatory frameworks, plus FX repatriation and energy-cost operating pressures."
             ]
         }
     }
@@ -799,50 +851,112 @@ def is_corporate_wikipedia_page(page) -> bool:
 
     return True
 
-def get_company_biography(company_name: str) -> Dict[str, Any]:
+def matches_resolved_entity_page(page, resolved_entity: Optional[Dict[str, Any]]) -> bool:
+    """
+    Verify that a candidate Wikipedia page's first paragraph actually matches the pre-flight
+    ResolvedEntity's sector, headquarters, and anchors — and contains ZERO negative keywords
+    (e.g., rejects '1781 slave ship' for Zong, or 'Jazz Pharmaceuticals'/'Utah Jazz'/'music' for Jazz Pakistan).
+    """
+    if not page or not page.exists():
+        return False
+    if not resolved_entity:
+        return True
+
+    first_para = (page.summary or "").split("\n")[0].lower()
+    full_summary = (page.summary or "").lower()
+    title_low = (page.title or "").lower()
+
+    # 1. Hard reject any negative keyword in title or first paragraph
+    for neg in (resolved_entity.get("negative_keywords") or []):
+        neg_low = neg.lower().strip()
+        if len(neg_low) >= 3 and (neg_low in title_low or neg_low in first_para):
+            return False
+
+    # 2. Positive verification against headquarters, sector, parent, or required anchors
+    hq_tokens = [t.strip().lower() for t in re.split(r'[,\s]+', resolved_entity.get("headquarters", "")) if len(t.strip()) >= 3 and t.strip().lower() != "global"]
+    sector_tokens = [t.strip().lower() for t in re.split(r'[\s,&/\-]+', resolved_entity.get("sector", "")) if len(t.strip()) >= 4 and t.strip().lower() not in ("services", "commercial", "solutions")]
+    anchor_tokens = [a.lower() for a in (resolved_entity.get("required_search_anchors") or []) if len(a) >= 3]
+
+    check_pool = hq_tokens + sector_tokens + anchor_tokens
+    if check_pool:
+        if not any(tok in full_summary for tok in check_pool):
+            return False
+    return True
+
+def get_company_biography(company_name: str, resolved_entity: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Fetch comprehensive, deep corporate history, founding milestones, subsidiaries, and business model.
-    1. First uses Wikipedia OpenSearch API to resolve exact canonical article title with strict validation.
-    2. Verifies that the article is genuinely a corporate/business page (not an album, band, or person).
+    1. If ResolvedEntity provides an exact wikipedia_title (e.g. 'Jazz_(mobile_network_operator)', 'Zong_4G'),
+       fetches that exact title FIRST and validates its first paragraph against sector/HQ/negative keywords.
+    2. Otherwise uses Wikipedia OpenSearch API with strict corporate & entity validation.
     3. Recursively extracts all sub-sections (History, Founding, Products, Operations).
-    4. If company is unlisted on Wikipedia (e.g. 10Pearls, JazzWorld), performs verified commercial press disclosures search.
+    4. Falls back to Authoritative Corporate Registry or verified media profile when offline/unlisted.
     """
     user_agent = "MarketIntelAgent/2.0 (https://github.com/multi-agent-project; contact@example.com)"
     wiki = wikipediaapi.Wikipedia(user_agent=user_agent, language="en")
     
     page = None
-    
-    # 1. Search Wikipedia OpenSearch for exact canonical titles
-    opensearch_candidates = search_wikipedia_titles(company_name)
-    
-    stripped_name = _strip_legal_suffixes(company_name)
-    fallback_candidates = list(dict.fromkeys([
-        stripped_name,
-        company_name,
-        f"{stripped_name} (company)",
-        f"{stripped_name} Corporation"
-    ]))
-    
-    all_candidates = opensearch_candidates + [c for c in fallback_candidates if c not in opensearch_candidates]
-    
-    for candidate in all_candidates:
-        if not is_valid_wiki_match(company_name, candidate):
-            continue
-        try:
-            p = wiki.page(candidate)
-            if p.exists() and len(p.summary) > 60:
-                # Disambiguation check, final title validation & corporate content check
-                if "may refer to:" not in p.summary and is_valid_wiki_match(company_name, p.title) and is_corporate_wikipedia_page(p):
-                    page = p
-                    break
-        except Exception:
-            pass
+    exact_wiki_title = (resolved_entity.get("wikipedia_title") or "").strip() if resolved_entity else ""
+
+    # 0. Exact pre-flight verified Wikipedia title fetch FIRST (prevents bare 'Jazz'/'Zong' collisions!)
+    if exact_wiki_title:
+        for title_try in [exact_wiki_title, exact_wiki_title.replace("_", " ")]:
+            try:
+                p = wiki.page(title_try)
+                if p.exists() and len(p.summary) > 60 and "may refer to:" not in p.summary:
+                    if is_corporate_wikipedia_page(p) and matches_resolved_entity_page(p, resolved_entity):
+                        page = p
+                        break
+            except Exception:
+                pass
+
+    # 1. Search Wikipedia OpenSearch using anchored query (never bare single-word ambiguous query when anchors exist)
+    if page is None:
+        search_target = company_name
+        if resolved_entity and len(company_name.split()) == 1 and resolved_entity.get("required_search_anchors"):
+            search_target = resolved_entity["required_search_anchors"][0]
+
+        opensearch_candidates = search_wikipedia_titles(search_target)
+        stripped_name = _strip_legal_suffixes(search_target)
+        fallback_candidates = list(dict.fromkeys([
+            stripped_name,
+            search_target,
+            f"{stripped_name} (company)",
+            f"{stripped_name} Corporation"
+        ]))
+        all_candidates = opensearch_candidates + [c for c in fallback_candidates if c not in opensearch_candidates]
+
+        for candidate in all_candidates:
+            if not is_valid_wiki_match(search_target, candidate):
+                continue
+            try:
+                p = wiki.page(candidate)
+                if p.exists() and len(p.summary) > 60:
+                    if (
+                        "may refer to:" not in p.summary
+                        and is_valid_wiki_match(search_target, p.title)
+                        and is_corporate_wikipedia_page(p)
+                        and matches_resolved_entity_page(p, resolved_entity)
+                    ):
+                        page = p
+                        break
+            except Exception:
+                pass
             
-    # Helper to find authoritative registry match if present
-    norm_name = company_name.lower().strip()
+    # Helper to find authoritative registry match (respecting ResolvedEntity so 'Jazz Pharmaceuticals' never matches 'jazz' Pakistan!)
+    norm_candidates = [company_name.lower().strip()]
+    if resolved_entity:
+        norm_candidates.extend([
+            (resolved_entity.get("canonical_name") or "").lower().strip(),
+            (resolved_entity.get("trade_name") or "").lower().strip(),
+            (resolved_entity.get("wikipedia_title") or "").lower().replace("_", " ").strip()
+        ])
     reg_match = None
     for reg_key, reg_data in VERIFIED_CORPORATE_REGISTRY.items():
-        if reg_key == norm_name or reg_key in norm_name or norm_name in reg_key:
+        # Guard: never match Pakistan telecom 'jazz' when resolved entity is Jazz Pharmaceuticals
+        if reg_key == "jazz" and resolved_entity and "pharma" in (resolved_entity.get("sector") or "").lower():
+            continue
+        if any(reg_key == nc or (len(reg_key) >= 4 and reg_key in nc) for nc in norm_candidates if nc):
             reg_match = reg_data
             break
 

@@ -24,7 +24,8 @@ UNIVERSAL FACTUAL & TEMPORAL RULES:
         2. Reasons through corporate history and moat using the LLM with 2026 temporal awareness.
         3. Returns structured, extensive corporate background with dynamic entity profile.
         """
-        tool_result = (shared_state.get("bio_tool_result") if shared_state else None) or get_company_biography(company_name)
+        resolved_entity = (shared_state.get("resolved_entity") or None) if shared_state else None
+        tool_result = (shared_state.get("bio_tool_result") if shared_state else None) or get_company_biography(company_name, resolved_entity=resolved_entity)
         source = tool_result.get("source", "Verified Profile")
         summary = tool_result.get("summary", "")
         detailed_content = tool_result.get("detailed_content", summary)
@@ -39,11 +40,15 @@ UNIVERSAL FACTUAL & TEMPORAL RULES:
             ((shared_state.get("breaking_governance") or []) if shared_state else [])
         ))
 
+        parent_line = ""
+        if resolved_entity and resolved_entity.get("entity_type") == "SUBSIDIARY":
+            parent_line = f"\n- Parent Ownership & Headquarters: {resolved_entity.get('ownership_pct', resolved_entity.get('parent_company'))} | HQ: {resolved_entity.get('headquarters')} | Sector: {resolved_entity.get('sector')}"
+
         prompt = f"""You are the Chief Corporate Historian & Strategic Enterprise Analyst.
 Synthesize an authoritative, comprehensive corporate biography for {company_name} based on verified intelligence:
 
 SOURCE INTELLIGENCE & VERIFIED PROFILE:
-- Entity Name: {company_name}
+- Entity Name: {company_name}{parent_line}
 - Founding Era & Origins: {founding_info if founding_info else 'Refer to established corporate records'}
 - Verified Leadership & Officers: {", ".join(verified_leadership) if verified_leadership else 'Refer to documented corporate filings'}
 - Documented Strategic Acquisitions: {"; ".join(verified_acquisitions) if verified_acquisitions else 'Documented M&A filings'}

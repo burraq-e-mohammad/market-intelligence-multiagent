@@ -3,6 +3,30 @@ from typing import List, Optional, Literal, Dict, Any
 import re
 
 
+class ResolvedEntity(BaseModel):
+    """
+    Strict pre-flight disambiguation schema produced by EntityResolverAgent before
+    spawning parallel research subagents. Prevents entity collision on short/ambiguous
+    or regional names (e.g., 'Jazz' -> Jazz Pakistan/VEON vs Jazz Pharmaceuticals/NBA;
+    'Zong' -> Zong 4G/CMPak vs 1781 ship/Wahaha; 'Samsung' -> Samsung Electronics).
+    """
+    canonical_name: str
+    trade_name: str
+    legal_entity_name: str
+    entity_type: Literal["PUBLIC", "PRIVATE", "SUBSIDIARY"]
+    ticker: Optional[str] = None
+    parent_company: Optional[str] = None
+    parent_ticker: Optional[str] = None
+    ownership_pct: Optional[str] = None
+    local_currency: str = "USD"
+    sector: str = "Technology & Services"
+    headquarters: str = "Global"
+    wikipedia_title: str = ""
+    required_search_anchors: List[str] = Field(default_factory=list)
+    negative_keywords: List[str] = Field(default_factory=list)
+    subsidiary_kpis: Dict[str, Any] = Field(default_factory=dict)
+
+
 class VerifiedOfficer(BaseModel):
     """
     Strict Pydantic schema for a verified corporate officer.

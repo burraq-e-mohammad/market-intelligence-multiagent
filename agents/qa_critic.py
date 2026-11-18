@@ -44,7 +44,7 @@ class QualityAssuranceAgent:
                 price_ctx_pat = re.compile(
                     r'(\b(?:share\s+price|stock\s+price|trading\s+at|trades\s+at|priced\s+at|closed\s+at|quote\s+of|price\s+of)\s+(?:of\s+|near\s+|around\s+)?)'
                     r'\$([789][0-9]{2}(?:\.[0-9]+)?)'
-                    r'(?![0-9\.]|\s*(?:B|M|T|K|billion|million|trillion|thousand|revenue|cap|sales|valuation)\b)',
+                    r'(?![0-9\.]|\s*(?:B|M|T|K|bn|mn|billion|million|trillion|thousand|revenue|cap|sales|valuation)\b)',
                     re.IGNORECASE
                 )
                 for field in text_fields:
@@ -257,7 +257,8 @@ class QualityAssuranceAgent:
             text, flags=re.IGNORECASE
         )
 
-        # D2. Private-Company Guard: Strip ONLY leaked public-equity Forward P/E & PEG Ratio boilerplate sentences
+        # D2. Private & Subsidiary Guards: Strip leaked public-equity PEG boilerplate and (for subsidiaries) VC/SaaS boilerplate
+        entity_type = shared_state.get("entity_type") or ("PUBLIC" if is_public else "PRIVATE")
         if not is_public:
             text = re.sub(
                 r'(?:###\s*)?Forward\s+P/E\s*&\s*PEG\s+Ratio\s+Alignment\s*:?\s*(?:The\s+PEG\s+ratio[^\.\n]*\.\s*)?',
@@ -271,6 +272,19 @@ class QualityAssuranceAgent:
                 r'Reverse-engineering\s+the\s+PEG\s+ratio[^\.\n]*\.\s*',
                 '', text, flags=re.IGNORECASE
             )
+        if entity_type == "SUBSIDIARY":
+            parent_co = (shared_state.get("resolved_entity") or {}).get("parent_company") or "its parent holding group"
+            text = re.sub(
+                r'\b(?:private\s+)?venture\s+capital\s+rounds?\b',
+                f'parent-group capital allocation via {parent_co}',
+                text, flags=re.IGNORECASE
+            )
+            text = re.sub(
+                r'\benterprise\s+software\s+contracts\s+and\s+recurring\s+subscription\s+models\b',
+                'large-scale subscriber connectivity, data monetization, and digital ecosystem services',
+                text, flags=re.IGNORECASE
+            )
+            text = re.sub(r'\bB2B\s+SaaS\s+subscriptions?\b', 'core regional commercial operations', text, flags=re.IGNORECASE)
 
         # E. Dynamic Leadership Governance Sanitization
         # If verified leadership does NOT contain a COO, strip generic hallucinated COO phrases

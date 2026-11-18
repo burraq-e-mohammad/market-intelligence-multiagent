@@ -1,4 +1,5 @@
 from agents.base_agent import BaseAgent
+from agents.entity_resolver import EntityResolverAgent
 from agents.financial_agent import FinancialAnalystAgent
 from agents.news_agent import NewsScoutAgent
 from agents.biography_agent import BiographyAgent
@@ -6,7 +7,7 @@ from agents.qa_critic import QualityAssuranceAgent
 from tools.finance_tool import get_financial_metrics
 from tools.wiki_tool import get_company_biography
 from tools.pdf_tool import generate_pdf_report
-from tools.schemas import VerifiedOfficer, parse_officer_string, reconcile_officers
+from tools.schemas import VerifiedOfficer, ResolvedEntity, parse_officer_string, reconcile_officers
 from typing import Dict, Any, Optional, Callable, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -30,17 +31,26 @@ You MUST enforce 100% internal consistency across all subagent reports and adher
 Never write a brief, shallow, or generic summary. Deliver comprehensive, structured paragraphs packed with real facts."""
         )
         
+        self.entity_resolver = EntityResolverAgent()
         self.financial_agent = FinancialAnalystAgent()
         self.news_agent = NewsScoutAgent()
         self.biography_agent = BiographyAgent()
         self.qa_critic = QualityAssuranceAgent()
 
-    def run_investigation(self, target_input: str, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
+    def run_investigation(
+        self,
+        target_input: str,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        region_hint: Optional[str] = None,
+        industry_hint: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Executes the full hierarchical multi-agent workflow:
-        1. Subagents run concurrently in parallel via ThreadPoolExecutor.
-        2. Parent Agent synthesizes data into deep Executive Briefing & Strategic Outlook.
-        3. Compiles Markdown and PDF reports with detailed verified sources.
+        0. Pre-flight EntityResolverAgent disambiguates short/ambiguous/regional entities into a strict ResolvedEntity.
+        1. Financial feed + anchored Corporate Biography populate locked Shared State.
+        2. Subagents run concurrently in parallel via ThreadPoolExecutor.
+        3. Parent Agent synthesizes data into deep Executive Briefing & Strategic Outlook.
+        4. QA Critic audits & sanitizes; Publisher compiles in-memory PDF dossier.
         """
         start_time = time.time()
         clean_target = target_input.strip()
@@ -63,19 +73,68 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         emit("Research Supervisor", "Parent Director", "started", f"Initiating deep investigation project for '{clean_target}'...")
         print(f"\n[Parent Agent: {self.name}] Initiating research project for '{clean_target}'...")
 
-        # Step 1: Resolve Exact Legal Entity Classification & Financial State FIRST,
-        # then resolve Corporate Profile using the exact canonical legal name (e.g. "Samsung Electronics Co., Ltd."
-        # instead of generic "Samsung") so conglomerate subsidiaries never pull parent-chaebol sister companies!
-        emit("Research Supervisor", "Parent Director", "resolving", f"Resolving exact legal entity classification and market feed for '{clean_target}'...")
-        tool_fin = get_financial_metrics(clean_target)
-        is_public = tool_fin.get("is_public", False)
-        metrics = tool_fin.get("data", {})
-        company_name = metrics.get("company_name", clean_target)
-        ticker = metrics.get("symbol", "PRIVATE / UNLISTED")
+        # Step 0: Pre-Flight Entity Disambiguation (prevents 'Jazz' -> JAZZ Pharma/NBA, 'Zong' -> 1781 ship, 'Samsung' -> Chaebol)
+        emit("Entity Resolver Agent", "Pre-Flight Disambiguation", "resolving", f"Disambiguating target entity, ownership tier, and search anchors for '{clean_target}'...")
+        pre_resolved = self.entity_resolver.resolve(clean_target, region_hint=region_hint, industry_hint=industry_hint)
 
-        # Use the resolved official legal name when querying corporate history (prevents conglomerate scope bleed)
-        bio_target = company_name if (is_public and company_name and len(company_name) > len(clean_target)) else clean_target
-        tool_bio = get_company_biography(bio_target)
+        # Step 1: Route Financial Feed by Pre-Flight Entity Classification (PUBLIC | SUBSIDIARY | PRIVATE)
+        if pre_resolved.entity_type == "SUBSIDIARY":
+            is_public = False
+            entity_type = "SUBSIDIARY"
+            company_name = pre_resolved.canonical_name
+            ticker = f"SUBSIDIARY ({pre_resolved.parent_ticker})" if pre_resolved.parent_ticker else "WHOLLY-OWNED SUBSIDIARY"
+            parent_metrics = {}
+            if pre_resolved.parent_ticker:
+                try:
+                    parent_fin = get_financial_metrics(pre_resolved.parent_ticker)
+                    if parent_fin.get("is_public"):
+                        parent_metrics = parent_fin.get("data", {})
+                except Exception:
+                    pass
+            metrics = {
+                "symbol": ticker,
+                "company_name": company_name,
+                "legal_entity_name": pre_resolved.legal_entity_name,
+                "entity_type": "Wholly-Owned Operating Subsidiary",
+                "exchange": f"Unlisted Subsidiary (Parent: {pre_resolved.parent_company})",
+                "sector": pre_resolved.sector,
+                "industry": pre_resolved.sector,
+                "headquarters": pre_resolved.headquarters,
+                "parent_company": pre_resolved.parent_company,
+                "parent_ticker": pre_resolved.parent_ticker,
+                "ownership_pct": pre_resolved.ownership_pct,
+                "local_currency": pre_resolved.local_currency,
+                "subsidiary_kpis": pre_resolved.subsidiary_kpis,
+                "parent_metrics": parent_metrics,
+                "is_public": False
+            }
+            resolved = pre_resolved
+        else:
+            fin_query = pre_resolved.ticker if (pre_resolved.entity_type == "PUBLIC" and pre_resolved.ticker) else clean_target
+            tool_fin = get_financial_metrics(fin_query)
+            is_public = tool_fin.get("is_public", False)
+            metrics = tool_fin.get("data", {})
+            # Reconcile ResolvedEntity with live financial probe if not already a curated entity
+            if pre_resolved.entity_type == "PUBLIC" and pre_resolved.ticker:
+                resolved = pre_resolved
+                company_name = pre_resolved.canonical_name or metrics.get("company_name", clean_target)
+            else:
+                resolved = self.entity_resolver.resolve(
+                    clean_target,
+                    region_hint=region_hint,
+                    industry_hint=industry_hint,
+                    financial_probe=tool_fin
+                )
+                company_name = metrics.get("company_name", resolved.canonical_name)
+            entity_type = resolved.entity_type
+            ticker = metrics.get("symbol", resolved.ticker or "PRIVATE / UNLISTED")
+
+        resolved_dict = resolved.model_dump()
+        emit("Entity Resolver Agent", "Pre-Flight Disambiguation", "completed", f"Resolved '{clean_target}' -> {resolved.canonical_name} [{entity_type}] | Wiki: {resolved.wikipedia_title}")
+
+        # Fetch Corporate Biography strictly anchored to ResolvedEntity (exact wikipedia_title + negative keyword guards)
+        bio_target = resolved.canonical_name if entity_type == "SUBSIDIARY" else (company_name if (is_public and company_name and len(company_name) > len(clean_target)) else clean_target)
+        tool_bio = get_company_biography(bio_target, resolved_entity=resolved_dict)
 
         pre_profile = tool_bio.get("entity_profile", {})
         pre_breaking_gov = pre_profile.get("breaking_governance", [])
@@ -93,8 +152,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
                 if parsed:
                     pre_officer_cands.append(parsed)
         # Only fall back to Yahoo/SEC companyOfficers when no current Infobox/Registry roster exists
-        # (prevents lagging SEC proxy feeds from re-introducing departed executives like former COOs)
-        if not pre_officer_cands:
+        if not pre_officer_cands and entity_type == "PUBLIC":
             for sec_off in (metrics.get("sec_officers") or []):
                 try:
                     pre_officer_cands.append(VerifiedOfficer(**sec_off))
@@ -106,6 +164,8 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             "company_name": company_name,
             "ticker": ticker,
             "is_public": is_public,
+            "entity_type": entity_type,
+            "resolved_entity": resolved_dict,
             "metrics": metrics,
             "current_price": metrics.get("current_price", "N/A"),
             "extended_hours_context": metrics.get("extended_hours_context", ""),
@@ -123,8 +183,8 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             "analyst_target_price": metrics.get("analyst_target_price", "N/A"),
             "analyst_rating": metrics.get("analyst_rating", "N/A"),
             "exchange": metrics.get("exchange", "Stock Exchange"),
-            "sector": metrics.get("sector", "Technology & Services"),
-            "industry": metrics.get("industry", "Enterprise Solutions"),
+            "sector": metrics.get("sector", resolved.sector),
+            "industry": metrics.get("industry", resolved.sector),
             "fiscal_calendar": metrics.get("fiscal_calendar", {}),
             "sec_officers": metrics.get("sec_officers", []),
             "verified_leadership": [o.formatted() for o in pre_reconciled],
@@ -135,9 +195,12 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             "temporal_year": 2026
         }
 
-        if is_public:
+        if entity_type == "PUBLIC":
             print(f"[Parent Agent] Classified as PUBLIC CORPORATION -> Ticker: {ticker} | Price: {metrics.get('current_price')} | Cap: {metrics.get('market_cap')}")
             emit("Research Supervisor", "Parent Director", "classified", f"Verified PUBLIC CORPORATION -> Ticker: {ticker} | Price: {metrics.get('current_price')} | Cap: {metrics.get('market_cap')}")
+        elif entity_type == "SUBSIDIARY":
+            print(f"[Parent Agent] Classified as WHOLLY-OWNED SUBSIDIARY -> {company_name} | Parent: {resolved.parent_company}")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified WHOLLY-OWNED SUBSIDIARY -> Parent: {resolved.parent_company} | HQ: {resolved.headquarters}")
         else:
             print(f"[Parent Agent] Classified as PRIVATE ENTERPRISE -> Status: Unlisted (No public stock ticker)")
             emit("Research Supervisor", "Parent Director", "classified", f"Verified PRIVATELY HELD ENTERPRISE -> Status: Unlisted (No public stock ticker)")
@@ -236,7 +299,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         sentiment_rationale = sentiment_pulse.get("rationale", "")
         pf = shared_state.get("private_financials") or {}
 
-        if is_public:
+        if entity_type == "PUBLIC" and is_public:
             verified_state_block = f"""VERIFIED PUBLIC-EQUITY STATE (SINGLE SOURCE OF TRUTH):
 - Company: {company_name} ({ticker}) | Exchange: {metrics.get('exchange', 'Stock Exchange')}
 - Current Stock Price: {metrics.get('current_price', 'N/A')}
@@ -251,6 +314,28 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
                 "1. PUBLIC EQUITY ACCURACY: Under NO circumstances state or quote a regular-session share price, multiple, or market cap that contradicts the Verified State above. "
                 "If extended-hours trading or fresh post-earnings actuals appear in Subagent 2 (News & Events), explicitly highlight those concrete figures (revenue, EPS, guidance, after-hours move) and note that market-data TTM feeds roll forward over 24-72 hours."
             )
+            fin_section_label = "Public Equity Multiples"
+        elif entity_type == "SUBSIDIARY":
+            sub_kpis = resolved_dict.get("subsidiary_kpis") or {}
+            parent_co = resolved_dict.get("parent_company") or "Parent Holding Group"
+            ownership = resolved_dict.get("ownership_pct") or f"Wholly-owned subsidiary of {parent_co}"
+            currency = resolved_dict.get("local_currency") or "Local Currency"
+            verified_state_block = f"""VERIFIED WHOLLY-OWNED SUBSIDIARY STATE (CONSOLIDATED ENTITY):
+- Canonical Name: {company_name} | Legal Name: {resolved_dict.get('legal_entity_name')}
+- Ownership Structure: {ownership}
+- Headquarters & Sector: {resolved_dict.get('headquarters')} | {resolved_dict.get('sector')}
+- Functional Currency: {currency} | Reporting Basis: {sub_kpis.get('reporting_basis', f'Consolidated under {parent_co}')}
+- Reported Revenue ({currency}): {sub_kpis.get('annual_revenue', f'Undisclosed standalone (Consolidated under {parent_co})')}
+- Reported EBITDA ({currency}): {sub_kpis.get('ebitda', f'Undisclosed standalone (Consolidated under {parent_co})')}
+- Operational & Subscriber KPIs: {sub_kpis.get('subscribers', 'Regional market operator')}
+- Digital / Platform Ecosystem: {sub_kpis.get('digital_ecosystem', 'Core commercial infrastructure')}
+- Credit Rating & Backing: {sub_kpis.get('credit_rating', f'Backed by {parent_co}')}"""
+            entity_fin_rule = (
+                f"1. STRICT SUBSIDIARY ROUTING: This is a WHOLLY-OWNED OPERATING SUBSIDIARY ({ownership}). "
+                f"NEVER mention 'venture capital rounds', 'founder equity', generic 'B2B SaaS recurring software contracts', or standalone public stock P/E & PEG multiples! "
+                f"Explicitly anchor the analysis in parent ownership ({parent_co}), local-currency ({currency}) revenue/EBITDA or consolidation status, subscriber scale, and regulatory/FX dynamics."
+            )
+            fin_section_label = f"Parent Ownership, {currency} Scale & Operational KPIs"
         else:
             pf_vals = " | ".join(pf.get("valuations", [])) or "Private institutional financing rounds"
             pf_funds = " | ".join(pf.get("funding_rounds", [])) or "Venture & strategic private capital"
@@ -267,8 +352,9 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
                 "NEVER output public-equity P/E or PEG ratio boilerplate, and NEVER describe revenue under $100B as 'triple-digit billion' "
                 "($10B-$99.9B is double-digit billion; $1B-$9.9B is multi-billion). Highlight documented post-money valuations, funding rounds, ARR run rate, and IPO timeline."
             )
+            fin_section_label = "Private Valuation, Funding & ARR"
 
-        synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Public Entity: {is_public}).
+        synthesis_prompt = f"""As Research Director, produce an in-depth, structured Executive Synthesis for {company_name} (Entity Classification: {entity_type}).
 
 {verified_state_block}
 
@@ -294,7 +380,7 @@ UNIVERSAL FACTUAL & CONTRADICTION PREVENTION DIRECTIVES:
 Section 1: EXECUTIVE_SUMMARY
 - Macro Enterprise Standing & Industry Positioning
 - Core Commercial Drivers & Operational Scale
-- Financial & Valuation Synthesis ({'Public Equity Multiples' if is_public else 'Private Valuation, Funding & ARR'})
+- Financial & Valuation Synthesis ({fin_section_label})
 - Sentiment & Event Integration (Aligned with {sentiment_tone})
 
 Section 2: STRATEGIC_OUTLOOK
@@ -367,6 +453,32 @@ STRATEGIC_OUTLOOK:
                     f"{company_name}'s multi-year expansion is propelled by aggressive technological innovation, scaling enterprise contracts {growth_segments}, "
                     f"and deepening integration across high-margin commercial ecosystems.{reg_risk_str}"
                 )
+            elif entity_type == "SUBSIDIARY":
+                sub_kpis = resolved_dict.get("subsidiary_kpis") or {}
+                parent_co = resolved_dict.get("parent_company") or "Parent Group"
+                ownership = resolved_dict.get("ownership_pct") or f"Wholly-owned subsidiary of {parent_co}"
+                currency = resolved_dict.get("local_currency") or "Local Currency"
+                clean_reg_join = "; ".join(r.rstrip(". ") for r in breaking_reg)
+                reg_str = f"\n\n### Regulatory, Spectrum & Macroeconomic Risks\nKey regulatory and operating risks include: {clean_reg_join}." if breaking_reg else (
+                    f"\n\n### Key Operational & Macroeconomic Risks\nPrimary risks include {currency} exchange-rate volatility against parent reporting currency, spectrum renewal capex, power/tower energy costs, and evolving local telecom regulations."
+                )
+
+                exec_summary = (
+                    f"### Subsidiary Standing & Parent Ownership\n"
+                    f"{company_name} (legally {resolved_dict.get('legal_entity_name')}) operates in {resolved_dict.get('headquarters')} as a {ownership}. "
+                    f"Active in {resolved_dict.get('sector')}, the operator combines nationwide telecom infrastructure with high-growth digital and fintech platforms.\n\n"
+                    f"### Consolidated Financial Scale & Operational KPIs ({currency})\n"
+                    f"Financials are reported under {sub_kpis.get('reporting_basis', parent_co)}. "
+                    f"Documented local-currency figures show Revenue of {sub_kpis.get('annual_revenue', f'Undisclosed standalone (Consolidated under {parent_co})')} and EBITDA of {sub_kpis.get('ebitda', f'Undisclosed standalone (Consolidated under {parent_co})')}. "
+                    f"Commercial leadership is underpinned by {sub_kpis.get('subscribers', 'strong regional subscriber scale')} alongside {sub_kpis.get('digital_ecosystem', 'expanding digital services')}.\n\n"
+                    f"### Market Sentiment & Strategic Positioning\n"
+                    f"Current media and market sentiment is {sentiment_tone.lower()}. Credit and capital backing remain anchored by {sub_kpis.get('credit_rating', parent_co)}."
+                )
+                growth_segments = f"across {', '.join(verified_segments)}" if verified_segments else "through 4G/5G broadband expansion and digital financial services"
+                strategic_outlook = (
+                    f"### Strategic Growth Vectors\n"
+                    f"{company_name}'s forward trajectory centers on scaling ARPU, monetizing high-speed mobile data, and expanding digital ecosystem services {growth_segments}.{reg_str}"
+                )
             else:
                 exec_summary = (
                     f"### Private Enterprise Standing & Core Scale\n"
@@ -391,6 +503,8 @@ STRATEGIC_OUTLOOK:
             "company_name": company_name,
             "ticker": ticker,
             "is_public": is_public,
+            "entity_type": entity_type,
+            "resolved_entity": resolved_dict,
             "metrics": metrics,
             "execution_time": elapsed_time,
             "executive_summary": exec_summary,

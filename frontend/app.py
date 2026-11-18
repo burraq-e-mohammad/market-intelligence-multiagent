@@ -194,6 +194,7 @@ if execute_btn or preset:
             import tools.news_tool
             import tools.finance_tool
             import tools.pdf_tool
+            import agents.entity_resolver
             import agents.biography_agent
             import agents.financial_agent
             import agents.news_agent
@@ -205,6 +206,7 @@ if execute_btn or preset:
             importlib.reload(tools.news_tool)
             importlib.reload(tools.finance_tool)
             importlib.reload(tools.pdf_tool)
+            importlib.reload(agents.entity_resolver)
             importlib.reload(agents.biography_agent)
             importlib.reload(agents.financial_agent)
             importlib.reload(agents.news_agent)
@@ -234,6 +236,8 @@ if execute_btn or preset:
 
     if dossier:
         is_public = dossier.get("is_public", False)
+        resolved_entity = dossier.get("resolved_entity") or dossier.get("shared_state", {}).get("resolved_entity") or {}
+        entity_type = dossier.get("entity_type") or resolved_entity.get("entity_type") or ("PUBLIC" if is_public else "PRIVATE")
         metrics = dossier.get("metrics", {})
         company_name = dossier.get("company_name", query_target)
         ticker = dossier.get("ticker", "UNLISTED")
@@ -244,9 +248,14 @@ if execute_btn or preset:
         st.markdown("---")
         header_col1, header_col2 = st.columns([3, 1])
         with header_col1:
-            if is_public:
+            if entity_type == "PUBLIC" and is_public:
                 st.markdown(f"## {company_name} <span class='badge-public'>PUBLIC TRADED: {ticker}</span> {time_badge}", unsafe_allow_html=True)
                 st.caption(f"Exchange: **{metrics.get('exchange', 'N/A')}** | Sector: **{metrics.get('sector', 'N/A')}** | Industry: **{metrics.get('industry', 'N/A')}**")
+            elif entity_type == "SUBSIDIARY":
+                parent_co = resolved_entity.get("parent_company") or metrics.get("parent_company") or "Parent Holding Group"
+                hq = resolved_entity.get("headquarters") or "Regional Market"
+                st.markdown(f"## {company_name} <span class='badge-private'>WHOLLY-OWNED SUBSIDIARY</span> {time_badge}", unsafe_allow_html=True)
+                st.caption(f"Parent Ownership: **{parent_co}** | HQ: **{hq}** | Sector: **{resolved_entity.get('sector', 'Telecom & Digital')}**")
             else:
                 st.markdown(f"## {company_name} <span class='badge-private'>PRIVATELY HELD ENTERPRISE</span> {time_badge}", unsafe_allow_html=True)
                 st.caption(f"Status: **Unlisted (No Public Stock Ticker)** | Reporting: **Exempt from SEC 10-K Filings**")
@@ -275,18 +284,25 @@ if execute_btn or preset:
 
         # KPI Metrics Cards
         st.markdown("### 📊 Fundamental Snapshot (Single Source of Truth)")
-        if is_public:
+        if entity_type == "PUBLIC" and is_public:
             kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
             kpi1.metric("Stock Price", str(metrics.get("current_price", "N/A")))
             kpi2.metric("Market Cap", str(metrics.get("market_cap", "N/A")))
             kpi3.metric("Trailing P/E", str(metrics.get("trailing_pe", metrics.get("pe_ratio", "N/A"))))
             kpi4.metric("Forward P/E", str(metrics.get("forward_pe", "N/A")))
             kpi5.metric("Consensus Rating", str(metrics.get("analyst_rating", "N/A")), delta=f"Target: {metrics.get('analyst_target_price', 'N/A')}")
+        elif entity_type == "SUBSIDIARY":
+            sub_kpis = resolved_entity.get("subsidiary_kpis") or metrics.get("subsidiary_kpis") or {}
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Entity Type", "Wholly-Owned Subsidiary")
+            s2.metric("Parent Company", str(resolved_entity.get("parent_company", "Parent Group")).split("(")[0].strip())
+            s3.metric("Functional Currency", str(resolved_entity.get("local_currency", "Local")))
+            s4.metric("Scale / Subs", str(sub_kpis.get("subscribers", "Regional Operator")).split("(")[0].strip())
         else:
             p1, p2, p3, p4 = st.columns(4)
             p1.metric("Entity Classification", "Privately Held")
             p2.metric("Public Trading", "Unlisted")
-            p3.metric("Ownership Structure", "Private / Venture")
+            p3.metric("Ownership Structure", "Private / Strategic")
             p4.metric("Market Valuation", "Private Rounds")
 
         # Executive Summary Box

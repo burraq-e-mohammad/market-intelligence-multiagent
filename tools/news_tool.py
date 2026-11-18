@@ -1,7 +1,7 @@
 import requests
 import xml.etree.ElementTree as ET
 import yfinance as yf
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import re
 
 def classify_breaking_events(articles: List[Dict[str, str]]) -> Dict[str, List[str]]:
@@ -97,7 +97,127 @@ def compute_sentiment_pulse(articles: List[Dict[str, str]], detected_events: Dic
         "rationale": "Recent headlines reflect steady operational coverage without extreme directional skew."
     }
 
-def _fetch_google_rss_stream(query_terms: str, clean_name: str, symbol: str, limit: int, existing_titles: set) -> List[Dict[str, str]]:
+def build_anchored_news_query(
+    clean_name: str,
+    symbol: str = "",
+    resolved_entity: Optional[Dict[str, Any]] = None,
+    recency: str = "when:30d"
+) -> str:
+    """
+    Construct a strict boolean Google News query using ResolvedEntity anchors,
+    negative keyword exclusions, and recency window.
+    Prevents bare single-word queries like 'Jazz' or 'Zong' from matching NBA, music, or 1781 ships.
+    """
+    trade = (resolved_entity.get("trade_name") or clean_name).strip() if resolved_entity else clean_name
+    anchors = list(resolved_entity.get("required_search_anchors") or []) if resolved_entity else []
+    negatives = list(resolved_entity.get("negative_keywords") or []) if resolved_entity else []
+
+    if resolved_entity and anchors:
+        # Combine trade_name with required anchors in strict boolean form
+        anchor_terms = [f'"{a}"' if " " in a else a for a in anchors[:5]]
+        hq = (resolved_entity.get("headquarters") or "").split(",")[-1].strip()
+        if hq and hq.lower() != "global" and not any(hq.lower() in a.lower() for a in anchors[:5]):
+            anchor_terms.append(f'"{hq}"')
+        base = f'("{trade}" AND ({" OR ".join(anchor_terms)}))'
+        if resolved_entity.get("entity_type") == "SUBSIDIARY":
+            # Also allow exact legal/brand anchor hits (e.g. "JazzCash" OR "CMPak" OR "Zong 4G")
+            strong_aliases = [f'"{a}"' for a in anchors[:3] if a.lower() != trade.lower()]
+            if strong_aliases:
+                base = f'({base} OR {" OR ".join(strong_aliases)})'
+    else:
+        base = f'"{clean_name}"'
+        if symbol and symbol != "PRIVATE / UNLISTED":
+            clean_sym = symbol.split(".")[0]
+            base += f' OR "{symbol}"'
+            if len(clean_sym) >= 3:
+                base += f' OR "{clean_sym}"'
+        base = f'({base})'
+
+    # Append negative exclusions (e.g. -"Jazz Pharmaceuticals" -"Utah Jazz" -NBA)
+    neg_clauses = []
+    for neg in negatives[:8]:
+        n_clean = neg.strip()
+        if not n_clean:
+            continue
+        neg_clauses.append(f'-"{n_clean}"' if " " in n_clean else f'-{n_clean}')
+
+    parts = [base] + neg_clauses
+    if recency:
+        parts.append(recency)
+    return " ".join(parts)
+
+def is_relevant_article(
+    title: str,
+    snippet: str,
+    clean_name: str,
+    symbol: str = "",
+    resolved_entity: Optional[Dict[str, Any]] = None
+) -> bool:
+    """
+    Strict pre-synthesis relevance filter:
+    1. Hard-drops any article containing negative keywords (e.g. Utah Jazz, Jazz Pharmaceuticals, slave ship, Wahaha, obituary).
+    2. Drops tangential viral soundbites without material policy/business substance.
+    3. Verifies entity match AND (for ambiguous/subsidiary entities) sector/geography/anchor match.
+    """
+    combined = f"{title} {snippet}".lower()
+    title_lower = title.lower()
+    clean_name_lower = clean_name.lower()
+    clean_sym = symbol.split(".")[0].lower() if (symbol and symbol != "PRIVATE / UNLISTED") else ""
+
+    # 1. Hard negative-keyword exclusion
+    if resolved_entity:
+        for neg in (resolved_entity.get("negative_keywords") or []):
+            n_low = neg.lower().strip()
+            if len(n_low) >= 3 and re.search(rf'\b{re.escape(n_low)}\b', combined):
+                return False
+
+    # 2. Skip non-material viral political soundbites / tangential gossip
+    is_material_policy = bool(re.search(r'\b(tariff|antitrust|doj|ftc|sec|eu|dma|probe|lawsuit|export|sanction|ban|fine|settlement|regulator|pta|spectrum|5g)\b', title_lower))
+    is_tangential_soundbite = bool(re.search(r'\b(should\s+replace|is\s+[\'"]?a\s+legend[\'"]?|calls\s+[\w\s]+\s+a\s+legend|mistakenly\s+calls|gaffe|quips|obituary)\b', title_lower))
+    if is_tangential_soundbite and not is_material_policy:
+        return False
+
+    # 3. False prefix guard for 'Systems Limited'
+    m = re.search(r'([A-Za-z0-9]+)\s+Systems\s+Limited', title, re.IGNORECASE)
+    if m and clean_name_lower == "systems limited":
+        prev_word = m.group(1).lower()
+        if prev_word not in ['the', 'at', 'in', 'of', 'for', 'about', 'and', 'from', 'with', 'to']:
+            return False
+
+    # 4. Positive entity + anchor/sector/geography match
+    trade_lower = (resolved_entity.get("trade_name") or clean_name).lower() if resolved_entity else clean_name_lower
+    anchors_lower = [a.lower() for a in (resolved_entity.get("required_search_anchors") or [])] if resolved_entity else []
+
+    mentions_entity = (
+        clean_name_lower in combined
+        or trade_lower in combined
+        or (clean_sym and len(clean_sym) >= 3 and bool(re.search(rf'\b{re.escape(clean_sym)}\b', combined)))
+        or any(a in combined for a in anchors_lower[:3])
+    )
+    if not mentions_entity:
+        return False
+
+    # For short/ambiguous names or subsidiaries, require at least one domain/geography/anchor hit!
+    if resolved_entity and (resolved_entity.get("entity_type") == "SUBSIDIARY" or len(trade_lower.split()) == 1):
+        hq_tokens = [t.strip().lower() for t in re.split(r'[,\s]+', resolved_entity.get("headquarters", "")) if len(t.strip()) >= 3 and t.strip().lower() != "global"]
+        sector_tokens = [t.strip().lower() for t in re.split(r'[\s,&/\-]+', resolved_entity.get("sector", "")) if len(t.strip()) >= 4 and t.strip().lower() not in ("services", "commercial", "solutions")]
+        parent_tokens = [t.strip().lower() for t in re.split(r'[\s\(\):,\-]+', resolved_entity.get("parent_company") or "") if len(t.strip()) >= 4 and t.strip().lower() not in ("limited", "ltd", "nasdaq", "sehk", "group")]
+        domain_pool = set(anchors_lower + hq_tokens + sector_tokens + parent_tokens + ["telecom", "4g", "5g", "broadband", "subscriber", "fintech", "pta", "earnings", "revenue", "ceo"])
+        # Exclude bare trade name itself from domain_pool so 'Jazz' alone isn't enough!
+        domain_pool.discard(trade_lower)
+        if domain_pool and not any(tok in combined for tok in domain_pool):
+            return False
+
+    return True
+
+def _fetch_google_rss_stream(
+    query_terms: str,
+    clean_name: str,
+    symbol: str,
+    limit: int,
+    existing_titles: set,
+    resolved_entity: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, str]]:
     """Helper to query a targeted Google News RSS stream with strict entity relevance filtering."""
     fetched: List[Dict[str, str]] = []
     try:
@@ -110,8 +230,6 @@ def _fetch_google_rss_stream(query_terms: str, clean_name: str, symbol: str, lim
         if response.status_code != 200:
             return fetched
         root = ET.fromstring(response.content)
-        clean_name_lower = clean_name.lower()
-        clean_sym = symbol.split(".")[0].lower() if (symbol and symbol != "PRIVATE / UNLISTED") else ""
 
         for item in root.findall(".//item"):
             if len(fetched) >= limit:
@@ -126,20 +244,7 @@ def _fetch_google_rss_stream(query_terms: str, clean_name: str, symbol: str, lim
             clean_desc = re.sub(r'<[^>]+>', ' ', raw_desc)
             clean_desc = " ".join(clean_desc.split())[:280]
 
-            title_lower = title.lower()
-            if clean_name_lower in title_lower or (clean_sym and len(clean_sym) >= 3 and re.search(rf'\b{re.escape(clean_sym)}\b', title_lower)):
-                # Skip non-material viral political soundbites / tangential gossip (e.g. "says ex Apple CEO is a legend, should replace ... at Nvidia")
-                # while keeping genuine regulatory, tariff, antitrust, or policy actions
-                is_material_policy = bool(re.search(r'\b(tariff|antitrust|doj|ftc|sec|eu|dma|probe|lawsuit|export|sanction|ban|fine|settlement|regulator)\b', title_lower))
-                is_tangential_soundbite = bool(re.search(r'\b(should\s+replace|is\s+[\'"]?a\s+legend[\'"]?|calls\s+[\w\s]+\s+a\s+legend|mistakenly\s+calls|gaffe|quips)\b', title_lower))
-                if is_tangential_soundbite and not is_material_policy:
-                    continue
-
-                m = re.search(r'([A-Za-z0-9]+)\s+Systems\s+Limited', title, re.IGNORECASE)
-                if m and clean_name_lower == "systems limited":
-                    prev_word = m.group(1).lower()
-                    if prev_word not in ['the', 'at', 'in', 'of', 'for', 'about', 'and', 'from', 'with', 'to']:
-                        continue
+            if is_relevant_article(title, clean_desc, clean_name, symbol=symbol, resolved_entity=resolved_entity):
                 if title and title not in existing_titles:
                     existing_titles.add(title)
                     fetched.append({
@@ -153,36 +258,38 @@ def _fetch_google_rss_stream(query_terms: str, clean_name: str, symbol: str, lim
         pass
     return fetched
 
-def get_company_news(company_name: str, symbol: str = "", max_results: int = 8) -> Dict[str, Any]:
+def get_company_news(
+    company_name: str,
+    symbol: str = "",
+    max_results: int = 8,
+    resolved_entity: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
-    Fetch verified breaking news for the exact target company using dual-stream RSS + Yahoo Finance:
-    1. General breaking headlines stream
-    2. High-signal Earnings Actuals, Guidance, Governance & Regulatory stream
-    3. Secondary ticker-specific Yahoo Finance news
+    Fetch verified breaking news for the exact ResolvedEntity using anchored boolean RSS queries,
+    negative keyword exclusions, strict recency filtering, and post-fetch relevance gating.
     """
     articles: List[Dict[str, str]] = []
     seen_titles: set = set()
     clean_name = company_name.strip()
 
-    # Build strict entity search term
-    base_terms = f'"{clean_name}"'
-    if symbol and symbol != "PRIVATE / UNLISTED":
-        clean_sym = symbol.split(".")[0]
-        base_terms += f' OR "{symbol}"'
-        if len(clean_sym) >= 3:
-            base_terms += f' OR "{clean_sym}"'
+    # 1a. High-signal stream (30-day recency, boolean anchors & negative exclusions)
+    base_30d = build_anchored_news_query(clean_name, symbol=symbol, resolved_entity=resolved_entity, recency="when:30d")
+    catalyst_query = f'{base_30d} (earnings OR revenue OR EPS OR guidance OR 5G OR spectrum OR CEO OR resigns OR appointed OR investigation OR partnership)'
+    articles.extend(_fetch_google_rss_stream(catalyst_query, clean_name, symbol, limit=max(4, max_results // 2), existing_titles=seen_titles, resolved_entity=resolved_entity))
 
-    # 1a. High-signal stream: Earnings actuals (revenue, EPS, guidance), leadership shifts & regulatory probes
-    catalyst_query = f'({base_terms}) (earnings OR revenue OR EPS OR guidance OR CEO OR resigns OR appointed OR investigation)'
-    articles.extend(_fetch_google_rss_stream(catalyst_query, clean_name, symbol, limit=max(4, max_results // 2), existing_titles=seen_titles))
-
-    # 1b. General breaking headlines stream
+    # 1b. General anchored breaking headlines stream (30-day recency)
     remaining = max(0, max_results - len(articles))
     if remaining > 0:
-        articles.extend(_fetch_google_rss_stream(base_terms, clean_name, symbol, limit=remaining, existing_titles=seen_titles))
+        articles.extend(_fetch_google_rss_stream(base_30d, clean_name, symbol, limit=remaining, existing_titles=seen_titles, resolved_entity=resolved_entity))
 
-    # 2. Secondary: If public stock symbol is present, add ticker-specific news from yfinance
-    if len(articles) < max_results and symbol and symbol != "PRIVATE / UNLISTED":
+    # 1c. If fewer than 2 articles in last 30d (common for regional subsidiaries), widen cleanly to 180d with same strict anchors
+    if len(articles) < 2:
+        base_180d = build_anchored_news_query(clean_name, symbol=symbol, resolved_entity=resolved_entity, recency="when:180d")
+        articles.extend(_fetch_google_rss_stream(base_180d, clean_name, symbol, limit=max_results - len(articles), existing_titles=seen_titles, resolved_entity=resolved_entity))
+
+    # 2. Secondary: If public stock symbol is present (and NOT a subsidiary without its own ticker), add yfinance news
+    is_subsidiary = resolved_entity and resolved_entity.get("entity_type") == "SUBSIDIARY"
+    if not is_subsidiary and len(articles) < max_results and symbol and symbol != "PRIVATE / UNLISTED":
         try:
             ticker = yf.Ticker(symbol)
             for item in (ticker.news or [])[:max_results]:
@@ -195,7 +302,8 @@ def get_company_news(company_name: str, symbol: str = "", max_results: int = 8) 
                 url = content.get("canonicalUrl", {}).get("url") if isinstance(content.get("canonicalUrl"), dict) else item.get("link", "")
                 pub_date = content.get("pubDate") or "Recent"
                 
-                if title and not any(a["title"] == title for a in articles):
+                if title and title not in seen_titles and is_relevant_article(title, summary, clean_name, symbol=symbol, resolved_entity=resolved_entity):
+                    seen_titles.add(title)
                     articles.append({
                         "title": title,
                         "source": provider,

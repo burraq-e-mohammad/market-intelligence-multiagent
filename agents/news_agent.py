@@ -45,7 +45,9 @@ Outline emerging risks, market vulnerabilities, export-control or regulatory inv
         2. Reasons through recent events using the LLM with locked verified state & fiscal calendar.
         3. Returns structured sentiment & news summary with dynamically detected events and aligned sentiment pulse.
         """
-        tool_result = get_company_news(company_name, symbol=symbol, max_results=8)
+        resolved_entity = (shared_state.get("resolved_entity") or None) if shared_state else None
+        display_name = (resolved_entity.get("canonical_name") if resolved_entity else None) or company_name
+        tool_result = get_company_news(display_name, symbol=symbol, max_results=8, resolved_entity=resolved_entity)
         articles: List[Dict[str, str]] = tool_result.get("articles", [])
         detected_events = tool_result.get("detected_events", {})
         baseline_sentiment = tool_result.get("sentiment_pulse", {
