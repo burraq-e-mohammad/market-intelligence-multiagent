@@ -137,11 +137,10 @@ class QualityAssuranceAgent:
         )
 
         # B. Comprehensive Post-Processing LaTeX / Escaped Currency / Math Artifact Stripper
-        # 1) Unescape ANY number of backslashes before $, %, &, _ FIRST (handles \$, \\$, \\$3.75T -> $3.75T)
-        text = re.sub(r'\\+\$', '$', text)
-        text = re.sub(r'\\+%', '%', text)
-        text = re.sub(r'\\+&', '&', text)
-        text = re.sub(r'\\+_', '_', text)
+        # 1) Unescape ANY number of ASCII/Unicode backslashes (with optional space) before $, %, &, _, * FIRST
+        text = re.sub(r'[\\\uFF3C\u2216]+\s*\$', '$', text)
+        text = re.sub(r'[\\\uFF3C\u2216]+([%&_\*#])', r'\1', text)
+        text = re.sub(r'\\(?=[0-9\$])', '', text)
         # 2) Unwrap LaTeX wrapper commands BEFORE stripping $...$ so $\text{P/E}$ -> $P/E$ -> P/E
         text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit|operatorname)\{([^\}]*)\}', r'\1', text)
         text = text.replace("\\times", "x").replace("\\approx", "~")

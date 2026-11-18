@@ -15,11 +15,10 @@ def sanitize_text(text: str) -> str:
         return ""
     
     # 1. Clean raw LaTeX / Escaped Currency / Math artifacts while preserving valid currency ($154.71, $3.78T, $115.8 billion)
-    # Unescape ANY number of backslashes before $, %, &, _ FIRST (handles \$, \\$, \\$3.75T -> $3.75T, \$115.8 billion -> $115.8 billion)
-    text = re.sub(r'\\+\$', '$', text)
-    text = re.sub(r'\\+%', '%', text)
-    text = re.sub(r'\\+&', '&', text)
-    text = re.sub(r'\\+_', '_', text)
+    # Unescape ANY number of ASCII/Unicode backslashes (with optional space) before $, %, &, _, * FIRST
+    text = re.sub(r'[\\\uFF3C\u2216]+\s*\$', '$', text)
+    text = re.sub(r'[\\\uFF3C\u2216]+([%&_\*#])', r'\1', text)
+    text = re.sub(r'\\(?=[0-9\$])', '', text)
     # Unwrap LaTeX wrapper commands BEFORE stripping $...$ so $\text{P/E}$ -> $P/E$ -> P/E
     text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit|operatorname)\{([^\}]*)\}', r'\1', text)
     text = text.replace("\\times", "x").replace("\\approx", "~")
@@ -299,24 +298,34 @@ def generate_pdf_report(
     pdf.section_title("5. Recent News, Strategic Moves & Market Sentiment")
     pdf.body_paragraph(news_analysis)
 
-    # Detailed Sources Section (Requested by user)
+    # Detailed Sources Section (Clean clickable hyperlinks without ugly raw URL line-wraps)
     pdf.section_title("Here are the Detailed Sources:")
     articles: List[Dict[str, str]] = news_articles
     if articles:
-        pdf.set_font("Helvetica", "", 8.5)
         for i, a in enumerate(articles, 1):
+            if pdf.get_y() > pdf.page_break_trigger - 18:
+                pdf.add_page()
             title = sanitize_text(a.get("title", ""))
-            source = sanitize_text(a.get("source", ""))
-            date = sanitize_text(a.get("date", ""))
-            url = sanitize_text(a.get("url", ""))
-            
+            source = sanitize_text(a.get("source", "Verified Source"))
+            date = sanitize_text(a.get("date", "Recent"))
+            url = (a.get("url") or "").strip()
+
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font("Helvetica", "B", 8.5)
             pdf.set_text_color(30, 64, 175) # Blue link style
             pdf.multi_cell(0, 4.5, f"{i}. {title}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(100, 116, 139) # Grey meta
             pdf.multi_cell(0, 4, f"   Publisher: {source} | Date: {date}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            if url:
-                pdf.cell(0, 4, f"   URL: {url[:80]}...", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.ln(1.5)
+
+            if url and url.startswith(("http://", "https://")):
+                pdf.set_x(pdf.l_margin)
+                pdf.set_font("Helvetica", "U", 8)
+                pdf.set_text_color(37, 99, 235)
+                pdf.cell(0, 4, f"   Read Article ({source})", link=url, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1.8)
     else:
         pdf.body_paragraph("No external news sources recorded for this profile.")
     

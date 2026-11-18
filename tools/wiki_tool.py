@@ -547,31 +547,57 @@ def _parse_usd_magnitude(amount_str: str) -> float:
 def extract_private_financial_profile(text: str) -> Dict[str, Any]:
     """
     Universal Private-Enterprise Financial Extractor (works for ANY unlisted firm: OpenAI, Stripe, SpaceX, Anthropic, Databricks, etc.).
-    Scans the ENTIRE corporate dossier (no early-cutoff bias toward 2019-2023 paragraphs) and selects
-    the MOST RECENT valuation, funding round, and revenue/ARR by (year, USD magnitude) descending.
+    Scans the ENTIRE corporate dossier, tracks (year, month) chronology, distinguishes company-wide ARR/revenue
+    from single-segment/advertising ARR, and selects the MOST RECENT confirmed valuation, funding round, and company ARR.
     """
     if not text:
         return {}
 
     sentences = re.split(r'(?<=[\.\!\?])\s+', text)
-    val_entries = []   # (year, usd_val, label, sentence)
-    fund_entries = []  # (year, usd_val, label, sentence)
-    rev_entries = []   # (year, usd_val, label, sentence)
-    ipo_entries = []   # (year, sentence)
+    val_entries = []   # (is_confirmed, year, month, usd_val, val_str, month_abbr, sentence)
+    fund_entries = []  # (year, month, usd_val, f_str, month_abbr, sentence)
+    rev_entries = []   # (is_confirmed, is_company_wide, year, month, usd_val, is_arr, seg_label, r_str, month_abbr, sentence)
+    ipo_entries = []   # (year, month, sentence)
 
     val_pat = re.compile(
         r'(?:\bvalu(?:ed|ation)\s+(?:at|of)\b|\b(?:post[- ]money|pre[- ]money)\s+valuation\b|\$[0-9\.,]+\s*(?:trillion|billion|million|T|B|M)\s+(?:post[- ]money\s+|pre[- ]money\s+)?valuation\b)',
         re.IGNORECASE
     )
-    fund_pat = re.compile(r'\b(raised|funding\s+round|investment\s+of|series\s+[a-z]|capital\s+raise|anchored\s+by|led\s+by)\b.*\$[0-9]|\$[0-9][^\.\n]{0,30}\b(funding\s+round|round|capital\s+raise)\b', re.IGNORECASE)
-    rev_pat = re.compile(r'\b(annualized\s+revenue|run\s+rate|\bARR\b|revenue\s+(?:of|reached|hit|grew|exceeded|was|surpassed|topped)|recognized\s+revenue)\b.*\$[0-9]|\$[0-9][^\.\n]{0,30}\b(in\s+(?:annual\s+)?revenue|ARR|run\s+rate)\b', re.IGNORECASE)
+    fund_pat = re.compile(
+        r'\b(raised|funding\s+round|investment\s+of|series\s+[a-z]|capital\s+raise|anchored\s+by|led\s+by|committed\s+capital|commitments?\s+of|expanded(?:\s+the\s+round)?\s+to|closed\s+(?:a\s+|at\s+)?|secured)\b.*\$[0-9]'
+        r'|\$[0-9][^\.\n]{0,35}\b(funding\s+round|round|capital\s+raise|in\s+committed\s+capital|in\s+new\s+funding|in\s+fresh\s+capital)\b',
+        re.IGNORECASE
+    )
+    rev_pat = re.compile(r'\b(annualized\s+revenue|run\s+rate|\bARR\b|revenue\s+(?:of|reached|hit|grew|exceeded|was|surpassed|topped)|recognized\s+revenue)\b.*\$[0-9]|\$[0-9][^\.\n]{0,35}\b(in\s+(?:annual(?:ized)?\s+)?revenue|ARR|run\s+rate)\b', re.IGNORECASE)
     ipo_pat = re.compile(r'\b(cash\s+burn|net\s+loss|operating\s+loss|profitab(?:le|ility)|IPO|initial\s+public\s+offering|public\s+benefit\s+corporation|PBC)\b', re.IGNORECASE)
+
+    # Detect segment / single-product-line revenue qualifiers so a sub-unit ARR (e.g. $1B Ads ARR) never replaces total company ARR
+    segment_qual_pat = re.compile(
+        r'\b(advertising|ads?\b|ad\s+business|ad\s+revenue|api\s+only|cloud\s+segment|gaming\s+segment|hardware\s+segment|'
+        r'consumer\s+tier|enterprise\s+tier|division|sub-unit|segment|product\s+line)\b',
+        re.IGNORECASE
+    )
 
     amt = r'(\$[0-9\.,]+\s*(?:trillion|billion|million|T|B|M))'
     year_pat = re.compile(r'\b(201[5-9]|202[0-9])\b')
+    month_map = {
+        "january": (1, "Jan"), "jan": (1, "Jan"),
+        "february": (2, "Feb"), "feb": (2, "Feb"),
+        "march": (3, "Mar"), "mar": (3, "Mar"),
+        "april": (4, "Apr"), "apr": (4, "Apr"),
+        "may": (5, "May"),
+        "june": (6, "Jun"), "jun": (6, "Jun"),
+        "july": (7, "Jul"), "jul": (7, "Jul"),
+        "august": (8, "Aug"), "aug": (8, "Aug"),
+        "september": (9, "Sep"), "sep": (9, "Sep"), "sept": (9, "Sep"),
+        "october": (10, "Oct"), "oct": (10, "Oct"),
+        "november": (11, "Nov"), "nov": (11, "Nov"),
+        "december": (12, "Dec"), "dec": (12, "Dec")
+    }
+    month_pat = re.compile(r'\b(' + '|'.join(month_map.keys()) + r')\b', re.IGNORECASE)
+
     from datetime import datetime as _dt
     current_cal_year = _dt.now().year
-    # Reject speculative/unconfirmed talk when ranking confirmed post-money valuations vs confirmed rounds
     speculative_pat = re.compile(r'\b(preliminary\s+talks|reportedly\s+in\s+talks|could\s+reach|projected\s+to|forecast|potential)\b', re.IGNORECASE)
 
     running_year = 0
@@ -580,13 +606,15 @@ def extract_private_financial_profile(text: str) -> Dict[str, Any]:
         if len(s_clean) < 25 or len(s_clean) > 420:
             continue
 
-        # Ignore future target years (e.g. "2027 IPO") when scoring historical/current transaction dates
         years_in_sent = [int(y) for y in year_pat.findall(s_clean) if int(y) <= current_cal_year]
         sent_year = max(years_in_sent) if years_in_sent else running_year
         if years_in_sent:
             running_year = max(years_in_sent)
 
-        # 1. Valuations (collect ALL across entire document, preferring confirmed post-money over talks)
+        months_in_sent = [month_map[m.lower()] for m in month_pat.findall(s_clean)]
+        sent_month_num, sent_month_abbr = max(months_in_sent, key=lambda x: x[0]) if months_in_sent else (0, "")
+
+        # 1. Valuations
         if val_pat.search(s_clean) and "$" in s_clean:
             m_list = list(re.finditer(rf'{amt}\s+(?:post[- ]money\s+|pre[- ]money\s+)?valuation\b', s_clean, re.IGNORECASE))
             if not m_list:
@@ -595,43 +623,58 @@ def extract_private_financial_profile(text: str) -> Dict[str, Any]:
                 best_m = max(m_list, key=lambda mm: _parse_usd_magnitude(mm.group(1)))
                 val_str = best_m.group(1)
                 is_confirmed = 0 if speculative_pat.search(s_clean) else 1
-                val_entries.append((sent_year, is_confirmed, _parse_usd_magnitude(val_str), val_str, s_clean))
+                val_entries.append((is_confirmed, sent_year, sent_month_num, _parse_usd_magnitude(val_str), val_str, sent_month_abbr, s_clean))
 
-        # 2. Funding Rounds
+        # 2. Funding Rounds (includes committed capital, expanded rounds, closed rounds)
         if fund_pat.search(s_clean):
-            m_list = list(re.finditer(rf'{amt}\s+(?:funding\s+round|round|investment|capital\s+raise)\b', s_clean, re.IGNORECASE))
-            if not m_list:
-                m_list = list(re.finditer(rf'\b(?:raised|investment\s+of)\s+(?:over\s+|roughly\s+|about\s+|up\s+to\s+)?{amt}', s_clean, re.IGNORECASE))
+            m_list = (
+                list(re.finditer(rf'{amt}\s+(?:in\s+)?(?:funding\s+round|round|investment|capital\s+raise|committed\s+capital|new\s+funding|fresh\s+capital)\b', s_clean, re.IGNORECASE))
+                + list(re.finditer(rf'\b(?:raised|secured|securing|investment\s+of|commitments?\s+of|expanded(?:\s+the\s+round)?\s+to|closed\s+(?:a\s+|at\s+)?)\s*(?:over\s+|roughly\s+|about\s+|up\s+to\s+)?{amt}', s_clean, re.IGNORECASE))
+            )
             if m_list:
                 best_m = max(m_list, key=lambda mm: _parse_usd_magnitude(mm.group(1)))
                 f_str = best_m.group(1)
-                fund_entries.append((sent_year, _parse_usd_magnitude(f_str), f_str, s_clean))
+                fund_entries.append((sent_year, sent_month_num, _parse_usd_magnitude(f_str), f_str, sent_month_abbr, s_clean))
 
-        # 3. Revenue & ARR (collect ALL across entire document, extract ALL revenue/ARR amounts in sentence)
+        # 3. Revenue & ARR (distinguish Company-Wide vs. Single-Segment/Ads ARR)
         if rev_pat.search(s_clean) and "$" in s_clean:
             m_list = (
                 list(re.finditer(rf'\b(?:ARR|run\s+rate)\s*(?:\(ARR\)\s*)?(?:hit|reached|of|exceeded|topped|surpassed|at|was)?\s*(?:~|approx\.?\s*|over\s+|roughly\s+|nearly\s+)?{amt}', s_clean, re.IGNORECASE))
-                + list(re.finditer(rf'{amt}\s+(?:in\s+)?(?:ARR|annualized\s+revenue|run\s+rate)\b', s_clean, re.IGNORECASE))
+                + list(re.finditer(rf'{amt}\s+(?:in\s+)?(?:[A-Za-z]+\s+)?(?:ARR|annualized\s+revenue|run\s+rate)\b', s_clean, re.IGNORECASE))
                 + list(re.finditer(rf'\brevenue\s+(?:of|reached|hit|exceeded|was|surpassed|topped|grew\s+to)\s+(?:over\s+|roughly\s+|about\s+)?{amt}', s_clean, re.IGNORECASE))
             )
             if m_list:
                 best_m = max(m_list, key=lambda mm: _parse_usd_magnitude(mm.group(1)))
                 r_str = best_m.group(1)
                 is_arr = 1 if re.search(r'\b(ARR|annualized|run\s+rate)\b', s_clean, re.IGNORECASE) else 0
-                is_proj = 0 if speculative_pat.search(s_clean) else 1
-                rev_entries.append((sent_year, is_proj, _parse_usd_magnitude(r_str), is_arr, r_str, s_clean))
+                is_confirmed = 0 if speculative_pat.search(s_clean) else 1
+                seg_m = segment_qual_pat.search(s_clean)
+                is_company_wide = 0 if seg_m else 1
+                seg_label = "Ads" if (seg_m and "ad" in seg_m.group(1).lower()) else (seg_m.group(1).title() if seg_m else "")
+                rev_entries.append([is_confirmed, is_company_wide, sent_year, sent_month_num, _parse_usd_magnitude(r_str), is_arr, seg_label, r_str, sent_month_abbr, s_clean])
 
         # 4. Cash Burn, Restructuring & IPO
         if ipo_pat.search(s_clean):
-            ipo_entries.append((sent_year, s_clean))
+            ipo_entries.append((sent_year, sent_month_num, s_clean))
 
-    # Sort descending: confirmed actuals outrank speculative talks/forecasts, then most recent year, then largest USD magnitude
-    val_entries.sort(key=lambda x: (x[1], x[0], x[2]), reverse=True)
-    fund_entries.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    rev_entries.sort(key=lambda x: (x[1], x[0], x[2]), reverse=True)
-    ipo_entries.sort(key=lambda x: x[0], reverse=True)
+    # Universal Magnitude Coherence Check for Revenue/ARR:
+    # If an earlier/recent confirmed company-wide ARR is > 3x a newer tiny figure (e.g. $12B in 2025 vs $1B in 2026),
+    # demote the tiny figure to segment/sub-unit so it never misrepresents total company revenue!
+    confirmed_rev_vals = [e[4] for e in rev_entries if e[0] == 1 and e[1] == 1 and e[2] >= current_cal_year - 2]
+    if confirmed_rev_vals:
+        peak_recent_rev = max(confirmed_rev_vals)
+        for e in rev_entries:
+            if e[1] == 1 and e[4] < (peak_recent_rev / 3.0) and e[2] >= current_cal_year - 1:
+                e[1] = 0
+                if not e[6]:
+                    e[6] = "Segment"
 
-    # Deduplicate sentences while keeping top 5 most recent
+    # Sort descending: confirmed actuals > company-wide > latest (year, month) > largest USD magnitude
+    val_entries.sort(key=lambda x: (x[0], x[1], x[2], x[3]), reverse=True)
+    fund_entries.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+    rev_entries.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]), reverse=True)
+    ipo_entries.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
     def _top_unique(entries, idx, limit=5):
         out = []
         for e in entries:
@@ -642,33 +685,44 @@ def extract_private_financial_profile(text: str) -> Dict[str, Any]:
                 break
         return out
 
+    def _date_tag(yr: int, mo_abbr: str) -> str:
+        if yr and mo_abbr:
+            return f" ({mo_abbr} {yr})"
+        if yr:
+            return f" ({yr})"
+        return ""
+
     latest_val_label = "Private / Undisclosed"
     if val_entries:
         top_v = val_entries[0]
-        yr_tag = f" ({top_v[0]})" if top_v[0] else ""
-        latest_val_label = f"{top_v[3]}{yr_tag}"
+        latest_val_label = f"{top_v[4]}{_date_tag(top_v[1], top_v[5])}"
 
     latest_fund_label = "Private Financing Rounds"
     if fund_entries:
         top_f = fund_entries[0]
-        yr_tag = f" ({top_f[0]})" if top_f[0] else ""
-        latest_fund_label = f"{top_f[2]} Round{yr_tag}"
+        latest_fund_label = f"{top_f[3]} Round{_date_tag(top_f[0], top_f[4])}"
 
     latest_rev_label = "Private Revenue / ARR"
     if rev_entries:
         top_r = rev_entries[0]
-        yr_tag = f" ({top_r[0]})" if top_r[0] else ""
-        arr_tag = " ARR" if top_r[3] else ""
-        latest_rev_label = f"{top_r[4]}{arr_tag}{yr_tag}"
+        arr_tag = " Company ARR" if (top_r[1] == 1 and top_r[5] == 1) else (" ARR" if top_r[5] == 1 else "")
+        latest_rev_label = f"{top_r[7]}{arr_tag}{_date_tag(top_r[2], top_r[8])}"
+        # If there is also a newer segment ARR (e.g. $1B Ads ARR in Aug 2026) while company ARR is from an earlier year, append cleanly
+        seg_newer = [e for e in rev_entries if e[0] == 1 and e[1] == 0 and (e[2], e[3]) > (top_r[2], top_r[3])]
+        if top_r[1] == 1 and seg_newer:
+            seg_newer.sort(key=lambda x: (x[2], x[3], x[4]), reverse=True)
+            sn = seg_newer[0]
+            sn_lbl = sn[6] or "Segment"
+            latest_rev_label += f"; {sn[7]} {sn_lbl} ARR{_date_tag(sn[2], sn[8])}"
 
     return {
         "latest_valuation_headline": latest_val_label,
         "latest_funding_headline": latest_fund_label,
         "latest_revenue_headline": latest_rev_label,
-        "valuations": _top_unique(val_entries, 4, 5),
-        "funding_rounds": _top_unique(fund_entries, 3, 5),
-        "revenue_and_arr": _top_unique(rev_entries, 5, 5),
-        "burn_and_ipo": _top_unique(ipo_entries, 1, 4)
+        "valuations": _top_unique(val_entries, 6, 5),
+        "funding_rounds": _top_unique(fund_entries, 5, 5),
+        "revenue_and_arr": _top_unique(rev_entries, 9, 5),
+        "burn_and_ipo": _top_unique(ipo_entries, 2, 4)
     }
 
 def is_corporate_wikipedia_page(page) -> bool:
