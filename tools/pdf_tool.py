@@ -14,9 +14,15 @@ def sanitize_text(text: str) -> str:
     if not text:
         return ""
     
-    # 1. Clean raw LaTeX / Escaped Currency / Math artifacts while preserving valid currency ($154.71, $3.78T, $115.8B)
-    # Unescape Markdown/LaTeX escaped punctuation FIRST (e.g. \$3.75T -> $3.75T, \$40,000 -> $40,000)
-    text = text.replace(r'\$', '$').replace(r'\%', '%').replace(r'\&', '&')
+    # 1. Clean raw LaTeX / Escaped Currency / Math artifacts while preserving valid currency ($154.71, $3.78T, $115.8 billion)
+    # Unescape ANY number of backslashes before $, %, &, _ FIRST (handles \$, \\$, \\$3.75T -> $3.75T, \$115.8 billion -> $115.8 billion)
+    text = re.sub(r'\\+\$', '$', text)
+    text = re.sub(r'\\+%', '%', text)
+    text = re.sub(r'\\+&', '&', text)
+    text = re.sub(r'\\+_', '_', text)
+    # Unwrap LaTeX wrapper commands BEFORE stripping $...$ so $\text{P/E}$ -> $P/E$ -> P/E
+    text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit|operatorname)\{([^\}]*)\}', r'\1', text)
+    text = text.replace("\\times", "x").replace("\\approx", "~")
     text = re.sub(r'\bJenson\b', 'Jensen', text)
     # Fix erratic mid-sentence capitalization after common adverbs (e.g. "heavily Fixated" -> "heavily fixated")
     text = re.sub(
@@ -33,13 +39,11 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r'\$Al\^\{\*\*\}', 'AI', text)
     text = re.sub(r'\$AI\^\{\*\*\}', 'AI', text)
     text = re.sub(r'\$Al\$', 'AI', text)
-    # Strip $P/E^{**}$, $P/E$, $EPS$, $AI$, etc.
-    text = re.sub(r'\$([A-Za-z][A-Za-z0-9/\-\s]{0,20}?)(?:\^\{\*+\})?\$', r'\1', text)
+    # Strip ALL non-currency inline math $...$ (e.g. $P/E$, $P/E^{**}$, $P / E$, $EPS$, $AI$)
+    text = re.sub(r'\$(?![0-9])([^\$\n]{1,40}?)\$', r'\1', text)
     # Strip $9.72x$, $48.9%$, $.^{**}19.07x^{**}$
     text = re.sub(r'\$\.?(?:\^\{\*+\})?\s*([0-9\.\,]+[xX%])(?:\^\{\*+\})?\s*\$?', r'\1', text)
     text = re.sub(r'\$([A-Za-z]+)\^\{?\*+\}?\s*([0-9\.\,]+)\^\{?\*+\}?\s*\$?', r'\1 $\2', text)
-    text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit)\{([^\}]*)\}', r'\1', text)
-    text = text.replace("\\times", "x").replace("\\approx", "~")
     text = re.sub(r'\^\{\*+\}', '', text)
     text = re.sub(r'\{\s*\}', '', text)
     text = text.replace("^{**}", "").replace("^{2}", "2").replace("^{3}", "3")
@@ -50,7 +54,7 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r'__(.+?)__', r'\1', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)
     text = text.replace("**", "")
-    # Remove any stray '$' NOT followed by a digit (currency)
+    # Remove any stray '$' NOT followed by a digit (currency like $3.75T, $115.8 billion stays intact!)
     text = re.sub(r'\$(?![0-9])', '', text)
     # Fix accidental double periods (e.g. "November 2026..") while preserving ellipses ("...")
     text = re.sub(r'(?<!\.)\.\.(?!\.)', '.', text)

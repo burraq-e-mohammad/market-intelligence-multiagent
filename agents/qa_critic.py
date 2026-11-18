@@ -135,9 +135,15 @@ class QualityAssuranceAgent:
         )
 
         # B. Comprehensive Post-Processing LaTeX / Escaped Currency / Math Artifact Stripper
-        # 1) Unescape Markdown/LaTeX escaped punctuation FIRST (e.g. \$3.75T -> $3.75T, \$40,000 -> $40,000, \% -> %)
-        text = text.replace(r'\$', '$').replace(r'\%', '%').replace(r'\&', '&')
-        # 2) Clean patterns like ${}^{**}9.72x^{**}$, $P/E^{**}$, $P/E$, $At^{**}154.71^{**}$, $Al^{**}$ while preserving currency like $154.71
+        # 1) Unescape ANY number of backslashes before $, %, &, _ FIRST (handles \$, \\$, \\$3.75T -> $3.75T)
+        text = re.sub(r'\\+\$', '$', text)
+        text = re.sub(r'\\+%', '%', text)
+        text = re.sub(r'\\+&', '&', text)
+        text = re.sub(r'\\+_', '_', text)
+        # 2) Unwrap LaTeX wrapper commands BEFORE stripping $...$ so $\text{P/E}$ -> $P/E$ -> P/E
+        text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit|operatorname)\{([^\}]*)\}', r'\1', text)
+        text = text.replace("\\times", "x").replace("\\approx", "~")
+        # 3) Clean patterns like ${}^{**}9.72x^{**}$, $P/E^{**}$, $P/E$, $At^{**}154.71^{**}$, $Al^{**}$ while preserving currency like $154.71
         text = re.sub(r'\$\s*\{\s*\}\s*\^\{\*+\}\s*([^\$\n]+?)\s*(?:\^\{\*+\})?\s*\$', r'\1', text)
         text = re.sub(r'\{\s*\}\s*\^\{\*+\}\s*([^\s\$\n]+?)\s*(?:\^\{\*+\})?', r'\1', text)
         text = re.sub(r'\$\s*At\^?\{?\*+\}?\s*([0-9\.\,]+)\^?\{?\*+\}?\s*\$?', r'At $\1', text)
@@ -145,21 +151,18 @@ class QualityAssuranceAgent:
         text = re.sub(r'\$Al\^\{\*\*\}', 'AI', text)
         text = re.sub(r'\$AI\^\{\*\*\}', 'AI', text)
         text = re.sub(r'\$Al\$', 'AI', text)
-        # Strip $TOKEN^{**}$ or $P/E$ or $EPS$ or $P/S$
-        text = re.sub(r'\$([A-Za-z][A-Za-z0-9/\-\s]{0,20}?)(?:\^\{\*+\})?\$', r'\1', text)
+        # Strip ALL non-currency inline math $...$ (e.g. $P/E$, $P/E^{**}$, $P / E$, $EPS$, $AI$)
+        text = re.sub(r'\$(?![0-9])([^\$\n]{1,40}?)\$', r'\1', text)
         # Strip $9.72x$, $48.9%$, $.^{**}19.07x^{**}$
         text = re.sub(r'\$\.?(?:\^\{\*+\})?\s*([0-9\.\,]+[xX%])(?:\^\{\*+\})?\s*\$?', r'\1', text)
         # Strip $word^{**}154.71^{**}$ -> word $154.71
         text = re.sub(r'\$([A-Za-z]+)\^\{?\*+\}?\s*([0-9\.\,]+)\^\{?\*+\}?\s*\$?', r'\1 $\2', text)
-        # Strip general LaTeX commands and leftover superscripts/empty braces
-        text = re.sub(r'\\(?:text|mathrm|mathbf|textbf|mathit)\{([^\}]*)\}', r'\1', text)
-        text = text.replace("\\times", "x").replace("\\approx", "~")
         text = re.sub(r'\^\{\*+\}', '', text)
         text = re.sub(r'\{\s*\}', '', text)
         text = text.replace("^{**}", "").replace("^{2}", "2").replace("^{3}", "3")
         text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
         text = re.sub(r'\\\[(.*?)\\\]', r'\1', text)
-        # Strip any stray '$' NOT immediately followed by a digit (valid currency like $3.75T stays intact!)
+        # Strip any stray '$' NOT immediately followed by a digit (valid currency like $3.75T, $115.8 billion stays intact!)
         text = re.sub(r'\$(?![0-9])', '', text)
         # Fix accidental double periods (e.g. "November 2026..") while preserving ellipses ("...")
         text = re.sub(r'(?<!\.)\.\.(?!\.)', '.', text)
@@ -229,17 +232,42 @@ class QualityAssuranceAgent:
             text = re.sub(r'\bseasoned\s+chief\s+operating\s+officer\b', 'senior executive leadership team', text, flags=re.IGNORECASE)
             text = re.sub(r'\bchief\s+operating\s+officer\s+(?:to\s+oversee|overseeing)\b', 'executive leadership team overseeing', text, flags=re.IGNORECASE)
 
-        # F. Dynamic M&A / Acquisition Date Reconciliation
-        # If an acquisition date exists in verified records, harmonize any misdated years cited in text
+        # F. Dynamic M&A / Acquisition Closing Date Reconciliation
+        # Matches both full legal name (e.g. "Mellanox Technologies") and short brand name ("Mellanox")
+        # and harmonizes misdated closing months/years (e.g. "closed in March 2019" -> "closed in April 2020")
+        # while preserving legitimate announcement dates ("announced in March 2019").
+        months_alt = r'(?:January|February|March|April|May|June|July|August|September|October|November|December)'
         for acq_record in verified_acquisitions:
-            m = re.match(r'([A-Za-z0-9\s]+?)\s*\(closed\s*([0-9]{4})', acq_record)
+            m = re.match(r'([A-Za-z0-9\s]+?)\s*\(closed\s*(?:([A-Za-z]+)\s+)?([0-9]{4})', acq_record)
             if m:
-                target_name = m.group(1).strip()
-                correct_year = m.group(2).strip()
-                if len(target_name) > 3:
+                full_target = m.group(1).strip()
+                correct_month = (m.group(2) or "").strip()
+                correct_year = m.group(3).strip()
+                correct_date = f"{correct_month} {correct_year}".strip() if correct_month else correct_year
+
+                short_target = re.sub(
+                    r'\s+\b(Technologies|Interactive|Networks|Electronics|Communications|Studios|Market|Engineering|Corporation|Corp|Inc|Ltd)\b\.?$',
+                    '', full_target, flags=re.IGNORECASE
+                ).strip()
+                name_variants = list(dict.fromkeys([n for n in [full_target, short_target] if len(n) > 3]))
+
+                for target_name in name_variants:
+                    # 1) Fix explicit "closed/completed/finalized in [Month] YYYY" when YYYY != correct_year
+                    def _fix_close(match):
+                        prefix, found_year = match.group(1), match.group(2)
+                        if found_year != correct_year:
+                            return f"{prefix} {correct_date}"
+                        return match.group(0)
+
                     text = re.sub(
-                        rf'({re.escape(target_name)}[^\.\n]{{0,35}}?(?:in|closed in))\s+[12][0-9]{{3}}\b',
-                        rf'\1 {correct_year}',
+                        rf'({re.escape(target_name)}[^\.\n]{{0,50}}?\b(?:closed|completed|finalized)\s+in)\s+(?:{months_alt}\s+)?([12][0-9]{{3}})\b',
+                        _fix_close,
+                        text, flags=re.IGNORECASE
+                    )
+                    # 2) Fix "acquired <Target> in YYYY" (not preceded by announced) when YYYY != correct_year
+                    text = re.sub(
+                        rf'((?<!announced\s)\b(?:acquired|acquisition\s+of)\s+{re.escape(target_name)}[^\.\n]{{0,30}}?\bin)\s+(?:{months_alt}\s+)?([12][0-9]{{3}})\b',
+                        _fix_close,
                         text, flags=re.IGNORECASE
                     )
 

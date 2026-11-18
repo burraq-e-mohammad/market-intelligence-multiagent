@@ -20,7 +20,7 @@ VERIFIED_CORPORATE_REGISTRY = {
                 "On November 12, 2026 (Q4 FY27), founder Jensen Huang stepped down as CEO, President, and Board member; the Board appointed CFO Colette Kress as Interim CEO and Harvey C. Jones as Chair of the Board (NVIDIA operates without a COO)."
             ],
             "verified_acquisitions": [
-                "Mellanox Technologies (closed 2020, $6.9B)",
+                "Mellanox Technologies (closed April 2020, $6.9B)",
                 "3dfx Interactive (closed 2002, $112M)",
                 "Cumulus Networks (closed 2020)"
             ],
