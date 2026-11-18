@@ -39,6 +39,23 @@ def free_port(port: int):
     except Exception:
         pass
 
+def wait_for_backend(timeout: int = 20) -> bool:
+    """Wait until FastAPI backend is bound and serving /openapi.json with /api/research/stream."""
+    import urllib.request
+    import json
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8000/openapi.json", timeout=2) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if "/api/research/stream" in data.get("paths", {}):
+                        return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
 def run_backend():
     free_port(8000)
     print("🚀 Starting FastAPI Backend at http://127.0.0.1:8000...")
@@ -68,7 +85,11 @@ def main():
         else:
             p_back = run_backend()
             processes.append(p_back)
-            time.sleep(2) # Give FastAPI a moment to bind
+            print("⏳ Waiting for FastAPI backend & /api/research/stream to come online...")
+            if wait_for_backend(timeout=20):
+                print("✅ FastAPI Backend verified online with /api/research/stream!")
+            else:
+                print("⚠️ Backend still initializing; launching Streamlit dashboard...")
             p_front = run_frontend()
             processes.append(p_front)
             print("\n✨ System Online!")
