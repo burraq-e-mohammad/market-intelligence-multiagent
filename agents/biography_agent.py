@@ -25,10 +25,17 @@ UNIVERSAL FACTUAL & TEMPORAL RULES:
         3. Returns structured, extensive corporate background with dynamic entity profile.
         """
         resolved_entity = (shared_state.get("resolved_entity") or None) if shared_state else None
-        tool_result = (shared_state.get("bio_tool_result") if shared_state else None) or get_company_biography(company_name, resolved_entity=resolved_entity)
+        live_biz_summary = ((shared_state.get("metrics") or {}).get("business_summary", "") if shared_state else "")
+        tool_result = (shared_state.get("bio_tool_result") if shared_state else None) or get_company_biography(
+            company_name,
+            resolved_entity=resolved_entity,
+            business_summary=live_biz_summary
+        )
         source = tool_result.get("source", "Verified Profile")
         summary = tool_result.get("summary", "")
         detailed_content = tool_result.get("detailed_content", summary)
+        if live_biz_summary and live_biz_summary[:80].lower() not in detailed_content.lower():
+            detailed_content = f"{detailed_content}\n\n## Live Market-Feed Business Description\n{live_biz_summary}"
         entity_profile = tool_result.get("entity_profile", {})
 
         founding_info = entity_profile.get("founding_info", "")
@@ -52,7 +59,7 @@ SOURCE INTELLIGENCE & VERIFIED PROFILE:
 - Founding Era & Origins: {founding_info if founding_info else 'Refer to established corporate records'}
 - Verified Leadership & Officers: {", ".join(verified_leadership) if verified_leadership else 'Refer to documented corporate filings'}
 - Documented Strategic Acquisitions: {"; ".join(verified_acquisitions) if verified_acquisitions else 'Documented M&A filings'}
-- Verified Operating Divisions & Product Lines: {", ".join(verified_segments) if verified_segments else 'Documented core enterprise divisions'}
+- Verified Operating Divisions & Product Lines: {", ".join(verified_segments) if verified_segments else 'Not pre-parsed (extract ONLY from the Source Dossier / Live Business Description below; if unavailable, explicitly state "Segment breakdown not retrieved from public filings" — NEVER invent IT/cloud consulting divisions)'}
 - Recent Leadership Milestones & Transitions: {"; ".join(breaking_gov) if breaking_gov else 'Standard executive governance'}
 
 FULL DETAILED SOURCE DOSSIER:
@@ -62,9 +69,12 @@ CRITICAL UNIVERSAL DIRECTIVES:
 1. Section 1 (Foundational History, Origins & Leadership Milestones):
    - Detail corporate origins, foundational era, leadership structure, and verified M&A milestones.
    - Strictly cite documented acquisition closing dates and deal values from the verified intelligence above.
+   - Preserve FULL multi-word investor and institution names (e.g., write 'Greenoaks Capital', 'Insight Partners', 'Scale Venture Partners' — NEVER truncate an investor name to a bare word like 'backed by Capital' or 'led by Partners').
    - Reflect current executive leadership and any breaking leadership transitions. Do NOT invent unverified titles (e.g. never state a COO was appointed if not in the verified record).
 2. Section 2 (Core Business Divisions, Solutions & Ecosystem):
-   - Align divisions strictly with the exact target entity's ({company_name}) verified products and reporting segments above. Never invent unrelated business divisions, and if the company belongs to a wider conglomerate/chaebol, NEVER list separately listed sister affiliates (e.g., separate insurance, shipbuilding, or biopharma affiliates) as internal operating divisions of {company_name}.
+   - Align divisions strictly with the exact target entity's ({company_name}) verified products and reporting segments above or explicitly named in the Source Dossier / Live Business Description.
+   - STRICT ANTI-HALLUCINATION RULE: NEVER default to generic IT/software consulting pillars (such as 'Enterprise Product Engineering', 'Cloud Infrastructure', or 'Digital Modernization') for non-IT enterprises (e.g. Testing/Inspection/Certification, Industrials, Manufacturing, Consumer, or Healthcare companies), even if a market feed tags the industry as 'Consulting Services'. If explicit divisions are absent from the source dossier, state 'Segment breakdown not retrieved from public filings' rather than inventing divisions.
+   - If the company belongs to a wider conglomerate/chaebol, NEVER list separately listed sister affiliates (e.g., separate insurance, shipbuilding, or biopharma affiliates) as internal operating divisions of {company_name}.
 3. Section 3 (Competitive Moat & Strategic Industry Positioning):
    - Analyze architectural moats, proprietary ecosystems, intellectual property, and customer retention dynamics.
 4. NEGATIVE DIRECTIVE: NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt' in your output.
@@ -120,11 +130,11 @@ Do NOT output disclaimers or apologies. Write an authoritative, professional cor
                 sec2_divisions = f"{company_name} structures its operational and commercial capabilities across specialized business lines:\n\n"
                 if verified_segments:
                     for idx, seg in enumerate(verified_segments, 1):
-                        sec2_divisions += f"{idx}. **{seg}**: Commercial platform delivering high-performance capabilities, core customer solutions, and scalable enterprise deployments.\n"
+                        sec2_divisions += f"{idx}. **{seg}**: Core commercial segment delivering specialized services, customer deployments, and operational solutions.\n"
                 else:
                     sec2_divisions += (
-                        "1. **Core Platform & Engineering Architecture**: Scalable technology delivery, core commercial solutions, and mission-critical client infrastructure.\n"
-                        "2. **Enterprise Solutions & Integration**: Advanced commercial deployment, ecosystem integration, and domain-specific delivery.\n"
+                        f"Detailed operating segment breakdown was not retrieved from public Wikipedia records for {company_name}. "
+                        f"{live_biz_summary if live_biz_summary else 'Refer to the company Investor Relations filings and audited annual reports for official reporting segments.'}\n"
                     )
 
                 sec3_moat = (

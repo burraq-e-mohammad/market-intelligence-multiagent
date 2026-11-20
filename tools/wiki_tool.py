@@ -1,265 +1,34 @@
-import wikipediaapi
+import sys
+import os
+
+# Auto-mount local project root & virtual environment site-packages if running outside venv
+_here = os.path.dirname(os.path.abspath(__file__))
+_root = os.path.abspath(os.path.join(_here, ".."))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+_venv_site_candidates = [
+    os.path.join(_root, "venv", "Lib", "site-packages"),
+    os.path.join(_root, ".venv", "Lib", "site-packages"),
+    os.path.join(_root, "venv", "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages"),
+]
+for _sp in _venv_site_candidates:
+    if os.path.isdir(_sp) and _sp not in sys.path:
+        sys.path.insert(0, _sp)
+
+try:
+    import wikipediaapi
+except ImportError:
+    wikipediaapi = None
+
 import requests
 import xml.etree.ElementTree as ET
 import re
 from typing import Dict, Any, List, Optional
 from tools.schemas import VerifiedOfficer, classify_role_category, parse_officer_string, reconcile_officers
 
-VERIFIED_CORPORATE_REGISTRY = {
-    "nvidia": {
-        "company": "NVIDIA Corporation",
-        "url": "https://en.wikipedia.org/wiki/Nvidia",
-        "summary": "NVIDIA Corporation is an American multinational corporation and technology company headquartered in Santa Clara, California. It designs graphics processing units (GPUs) for gaming, cryptocurrency mining, and professional design, as well as system-on-a-chip units (SoCs) for the mobile computing and automotive market. NVIDIA is a leading global supplier of artificial intelligence hardware and software.",
-        "entity_profile": {
-            "founding_info": "Founded in 1993 by Jensen Huang, Chris Malachowsky, and Curtis Priem",
-            "verified_leadership": [
-                "Colette Kress (Interim CEO & CFO)",
-                "Harvey C. Jones (Chair of the Board)"
-            ],
-            "breaking_governance": [
-                "On November 12, 2026 (Q4 FY27), founder Jensen Huang stepped down as CEO, President, and Board member; the Board appointed CFO Colette Kress as Interim CEO and Harvey C. Jones as Chair of the Board (NVIDIA operates without a COO)."
-            ],
-            "verified_acquisitions": [
-                "Mellanox Technologies (closed April 2020, $6.9B)",
-                "3dfx Interactive (closed 2002, $112M)",
-                "Cumulus Networks (closed 2020)"
-            ],
-            "verified_segments": [
-                "Data Center (Enterprise AI Compute & InfiniBand/Ethernet Networking)",
-                "Gaming (GeForce RTX GPUs, Desktop/Mobile Graphics, GeForce NOW)",
-                "Professional Visualization (NVIDIA RTX Workstations, Omniverse Platform)",
-                "Automotive (NVIDIA DRIVE AGX, DRIVE Thor, Autonomous Vehicle Software)"
-            ],
-            "breaking_regulatory": [
-                "Megaspeed & China export-control compliance investigation, leading to the Board forming the National Security and Export Control Oversight Committee in November 2026."
-            ]
-        }
-    },
-    "apple": {
-        "company": "Apple Inc.",
-        "url": "https://en.wikipedia.org/wiki/Apple_Inc.",
-        "summary": "Apple Inc. is an American multinational corporation and technology company headquartered in Cupertino, California. It is the world's largest technology company by revenue, known for consumer electronics, software, and online services.",
-        "entity_profile": {
-            "founding_info": "Founded in 1976 by Steve Jobs, Steve Wozniak, and Ronald Wayne",
-            "verified_leadership": [
-                "Tim Cook (CEO)",
-                "Arthur D. Levinson (Chair of the Board)",
-                "Kevan Parekh (CFO)"
-            ],
-            "breaking_governance": [
-                "Executive team operates under CEO Tim Cook, CFO Kevan Parekh, and Chair Arthur D. Levinson."
-            ],
-            "verified_acquisitions": [
-                "Beats Electronics (closed 2014, $3B)",
-                "Shazam (closed 2018, $400M)",
-                "Intel Smartphone Modem Business (closed 2019, $1B)"
-            ],
-            "verified_segments": [
-                "iPhone (Flagship Smartphone Line)",
-                "Services (App Store, Apple Music, Apple Pay, iCloud)",
-                "Wearables, Home and Accessories (Apple Watch, AirPods)",
-                "Mac (MacBook, iMac, Apple Silicon Compute)",
-                "iPad (Tablet Ecosystem)"
-            ],
-            "breaking_regulatory": [
-                "US Department of Justice antitrust complaint regarding smartphone market integration and European Commission Digital Markets Act compliance."
-            ]
-        }
-    },
-    "microsoft": {
-        "company": "Microsoft Corporation",
-        "url": "https://en.wikipedia.org/wiki/Microsoft",
-        "summary": "Microsoft Corporation is an American multinational corporation and technology company headquartered in Redmond, Washington. Microsoft's best-known software products are the Windows operating system line, the Microsoft 365 suite, and the Edge web browser.",
-        "entity_profile": {
-            "founding_info": "Founded in 1975 by Bill Gates and Paul Allen",
-            "verified_leadership": [
-                "Satya Nadella (Chairman and CEO)",
-                "Amy Hood (CFO)",
-                "Brad Smith (Vice Chair and President)"
-            ],
-            "breaking_governance": [
-                "Executive stewardship under Chairman and CEO Satya Nadella."
-            ],
-            "verified_acquisitions": [
-                "Activision Blizzard (closed 2023, $68.7B)",
-                "LinkedIn (closed 2016, $26.2B)",
-                "GitHub (closed 2018, $7.5B)",
-                "Nuance Communications (closed 2022, $19.7B)"
-            ],
-            "verified_segments": [
-                "Intelligent Cloud (Azure Cloud Infrastructure, Windows Server, Enterprise Services)",
-                "Productivity and Business Processes (Microsoft 365, LinkedIn, Dynamics 365)",
-                "More Personal Computing (Windows OEM, Xbox Gaming, Surface Devices)"
-            ],
-            "breaking_regulatory": [
-                "Antitrust regulatory reviews across US FTC and UK CMA regarding cloud productivity software bundling and AI partner governance."
-            ]
-        }
-    },
-    "tesla": {
-        "company": "Tesla, Inc.",
-        "url": "https://en.wikipedia.org/wiki/Tesla,_Inc.",
-        "summary": "Tesla, Inc. is an American multinational automotive and clean energy company headquartered in Austin, Texas. It designs and manufactures electric vehicles, stationary battery energy storage devices, solar panels, and related products and services.",
-        "entity_profile": {
-            "founding_info": "Founded in 2003 by Martin Eberhard and Marc Tarpenning; led by Elon Musk",
-            "verified_leadership": [
-                "Elon Musk (Technoking of Tesla & CEO)",
-                "Robyn Denholm (Chair of the Board)",
-                "Vaibhav Taneja (CFO)"
-            ],
-            "breaking_governance": [
-                "Corporate leadership directed by Technoking/CEO Elon Musk and Board Chair Robyn Denholm."
-            ],
-            "verified_acquisitions": [
-                "SolarCity (closed 2016, $2.6B)",
-                "Grohmann Engineering (closed 2017, $150M)",
-                "Maxwell Technologies (closed 2019, $218M)"
-            ],
-            "verified_segments": [
-                "Automotive (Model Y, Model 3, Cybertruck, Full Self-Driving Hardware)",
-                "Energy Generation and Storage (Megapack, Powerwall, Solar Roof)",
-                "Services and Other (Supercharger Network, Vehicle Service)"
-            ],
-            "breaking_regulatory": [
-                "NHTSA regulatory monitoring regarding Autopilot / Full Self-Driving driver monitoring systems and federal disclosure compliance."
-            ]
-        }
-    },
-    "amazon": {
-        "company": "Amazon.com, Inc.",
-        "url": "https://en.wikipedia.org/wiki/Amazon_(company)",
-        "summary": "Amazon.com, Inc. is an American multinational technology company focusing on e-commerce, cloud computing, online advertising, digital streaming, and artificial intelligence.",
-        "entity_profile": {
-            "founding_info": "Founded in 1994 by Jeff Bezos",
-            "verified_leadership": [
-                "Andy Jassy (President & CEO)",
-                "Jeff Bezos (Executive Chair)",
-                "Brian Olsavsky (CFO)"
-            ],
-            "breaking_governance": [
-                "Executive operations led by President and CEO Andy Jassy alongside Executive Chair Jeff Bezos."
-            ],
-            "verified_acquisitions": [
-                "Whole Foods Market (closed 2017, $13.7B)",
-                "MGM Studios (closed 2022, $8.5B)",
-                "One Medical (closed 2023, $3.9B)"
-            ],
-            "verified_segments": [
-                "Amazon Web Services (AWS Cloud Infrastructure & AI Bedrock)",
-                "North America (Online & Physical Retail, Prime Subscriptions)",
-                "International (Global E-Commerce & Third-Party Seller Services)"
-            ],
-            "breaking_regulatory": [
-                "FTC antitrust litigation regarding merchant marketplace pricing and logistics requirements."
-            ]
-        }
-    },
-    "systems limited": {
-        "company": "Systems Limited",
-        "url": "https://en.wikipedia.org/wiki/Systems_Limited",
-        "summary": "Systems Limited is a Pakistani multinational technology company headquartered in Lahore, Pakistan. Established in 1977, it is Pakistan's first software house and IT services exporter.",
-        "entity_profile": {
-            "founding_info": "Founded in 1977 as Pakistan's pioneer commercial software export house",
-            "verified_leadership": [
-                "Asif Peer (CEO and Managing Director)",
-                "Aezaz Hussain (Founder and Director)"
-            ],
-            "breaking_governance": [
-                "Commercial operations led by CEO and Managing Director Asif Peer."
-            ],
-            "verified_acquisitions": [
-                "NdC Tech (closed 2022, Core Banking Solutions)"
-            ],
-            "verified_segments": [
-                "Digital Transformation & Cloud Modernization",
-                "Banking, Financial Services & Insurance (BFSI) Solutions",
-                "Business Process Outsourcing (BPO) & Enterprise Applications"
-            ],
-            "breaking_regulatory": [
-                "Compliance with State Bank of Pakistan foreign remittance and export regulatory frameworks."
-            ]
-        }
-    },
-    "samsung electronics": {
-        "company": "Samsung Electronics Co., Ltd.",
-        "url": "https://en.wikipedia.org/wiki/Samsung_Electronics",
-        "summary": "Samsung Electronics Co., Ltd. is a South Korean multinational major appliance and consumer electronics corporation headquartered in Yeongtong-gu, Suwon, South Korea. It is the world's largest producer of memory semiconductors and smartphones, operating as a standalone publicly traded flagship of the broader Samsung Group.",
-        "entity_profile": {
-            "founding_info": "Founded in 1969 in Suwon, South Korea as an electronics flagship (separate listed entity from Samsung Group sister affiliates)",
-            "verified_leadership": [
-                "Lee Jae-yong (Executive Chairman)",
-                "Jun Young-hyun (Vice Chairman & Head of DS Division)"
-            ],
-            "breaking_governance": [
-                "Corporate strategy led by Executive Chairman Lee Jae-yong and Device Solutions head Jun Young-hyun."
-            ],
-            "verified_acquisitions": [
-                "Harman International Industries (closed 2017, $8B)"
-            ],
-            "verified_segments": [
-                "Device Solutions (DS: Memory/HBM/DRAM/NAND, Foundry, System LSI)",
-                "Device eXperience (DX: Mobile eXperience/Galaxy, Visual Display, Digital Appliances, Networks)",
-                "Samsung Display (SDC: OLED & QD-OLED Display Panels)",
-                "Harman (Connected Automotive Systems & Audio Technologies)"
-            ],
-            "breaking_regulatory": [
-                "Global semiconductor export-control compliance (US-China chip restrictions) and South Korean Fair Trade Commission (KFTC) oversight."
-            ]
-        }
-    },
-    "jazz": {
-        "company": "Jazz (JazzWorld Pakistan Limited / PMCL)",
-        "url": "https://en.wikipedia.org/wiki/Jazz_(mobile_network_operator)",
-        "summary": "Jazz (legally Pakistan Mobile Communications Limited / JazzWorld Pakistan Limited) is Pakistan's largest mobile network and digital operator, headquartered in Islamabad, Pakistan. Wholly owned by VEON Ltd. (NASDAQ: VEON), Jazz serves over 76 million cellular subscribers and operates Pakistan's leading fintech platform JazzCash alongside Tamasha OTT, Simosa, and Garaj Cloud.",
-        "entity_profile": {
-            "founding_info": "Founded in 1994 as Mobilink (Pakistan's pioneer GSM operator); merged with Warid Pakistan in 2016 and rebranded as Jazz under parent VEON Ltd.",
-            "verified_leadership": [
-                "Aamir Ibrahim (CEO)"
-            ],
-            "breaking_governance": [
-                "Wholly-owned subsidiary (100%) of VEON Ltd. (NASDAQ: VEON), led in Pakistan by CEO Aamir Ibrahim."
-            ],
-            "verified_acquisitions": [
-                "Warid Pakistan (merger closed 2016)",
-                "Mobilink Microfinance Bank (parent financial services arm powering JazzCash)"
-            ],
-            "verified_segments": [
-                "Core Telecom & 4G/5G Mobile Broadband Connectivity (~76M+ subscribers, ~37%+ market share)",
-                "JazzCash Digital Financial Services & Mobile Wallets (~19M+ MAUs, branchless banking leader)",
-                "Digital Entertainment & Super-App Ecosystem (Tamasha OTT, Simosa, FikrFree)",
-                "Jazz Business & Garaj Cloud (Enterprise Connectivity, IoT & Sovereign Cloud Infrastructure)"
-            ],
-            "breaking_regulatory": [
-                "Pakistan Telecommunication Authority (PTA) spectrum renewal/5G auction compliance, SBP digital banking oversight for JazzCash, and Pakistani telecom taxation/FX repatriation frameworks."
-            ]
-        }
-    },
-    "zong": {
-        "company": "Zong 4G (China Mobile Pakistan / CMPak)",
-        "url": "https://en.wikipedia.org/wiki/Zong_4G",
-        "summary": "Zong 4G (legally China Mobile Pakistan Limited / CMPak) is Pakistan's second-largest cellular network operator and a leading 4G mobile broadband provider, headquartered in Islamabad, Pakistan. It is a 100% wholly-owned overseas subsidiary of China Mobile Limited (SEHK: 0941.HK), established in 2007 through the acquisition of Paktel and launched under the Zong brand in 2008.",
-        "entity_profile": {
-            "founding_info": "Established in 2007 via China Mobile's acquisition of Paktel (Pakistan's first mobile operator, founded 1990) and launched commercially as Zong in 2008",
-            "verified_leadership": [
-                "Wang Hua (CEO & Chairman, CMPak)"
-            ],
-            "breaking_governance": [
-                "100% wholly-owned overseas subsidiary of China Mobile Limited (SEHK: 0941.HK)."
-            ],
-            "verified_acquisitions": [
-                "Paktel (acquired by China Mobile in 2007, $460M)"
-            ],
-            "verified_segments": [
-                "4G LTE & 5G-Ready Mobile Broadband Network (~50M+ subscribers, 15,000+ nationwide 4G towers)",
-                "Enterprise Solutions, M2M & IoT Connectivity (Corporate Data, Cloud & CPEC Infrastructure)",
-                "Digital Consumer Services & Fintech (My Zong App, PayMax Mobile Wallet, International Roaming)"
-            ],
-            "breaking_regulatory": [
-                "Pakistan Telecommunication Authority (PTA) spectrum licensing and 5G auction regulatory frameworks, plus FX repatriation and energy-cost operating pressures."
-            ]
-        }
-    }
-}
+# Dynamic Runtime Extraction: No hardcoded company registries in production code.
+VERIFIED_CORPORATE_REGISTRY: Dict[str, Any] = {}
 
 def is_valid_wiki_match(company_name: str, wiki_title: str) -> bool:
     """
@@ -288,9 +57,14 @@ def is_valid_wiki_match(company_name: str, wiki_title: str) -> bool:
     if clean_target.replace(" ", "") == clean_cand.replace(" ", ""):
         return True
 
-    # 2. Strip corporate suffixes from both
-    suffixes = [r'\binc\b', r'\bcorporation\b', r'\bcorp\b', r'\bltd\b', r'\blimited\b', 
-                r'\btechnologies\b', r'\bcompany\b', r'\bco\b', r'\bgroup\b', r'\bholdings\b', r'\bllc\b']
+    # 2. Strip international corporate suffixes from both (US + European SA/SE/NV/BV/AG/SpA/SAS/PLC/GmbH)
+    suffixes = [
+        r'\binc\b', r'\bcorporation\b', r'\bcorp\b', r'\bltd\b', r'\blimited\b',
+        r'\btechnologies\b', r'\bcompany\b', r'\bco\b', r'\bgroup\b', r'\bholdings\b',
+        r'\bllc\b', r'\bplc\b', r'\bsa\b', r'\bsas\b', r'\bsarl\b', r'\bse\b',
+        r'\bnv\b', r'\bbv\b', r'\bag\b', r'\bspa\b', r'\bgmbh\b', r'\bkgaa\b',
+        r'\bab\b', r'\basa\b', r'\boyj\b'
+    ]
     
     stem_target = clean_target
     stem_cand = clean_cand
@@ -326,9 +100,9 @@ def is_valid_wiki_match(company_name: str, wiki_title: str) -> bool:
     return False
 
 def _strip_legal_suffixes(name: str) -> str:
-    """Strip international corporate legal suffixes (Co., Ltd., Inc., Corp., PLC, S.A., N.V., AG, GmbH, etc.)."""
+    """Strip international corporate legal suffixes (Co., Ltd., Inc., Corp., PLC, S.A./SA, N.V./NV, B.V./BV, SAS, SpA, AG, GmbH, SE, AB, etc.)."""
     cleaned = re.sub(
-        r',?\s*\b(?:Co\.?,?\s*Ltd\.?|Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|PLC|S\.A\.|N\.V\.|AG|GmbH|SE|LLC|PBC|Holdings)\b\.?',
+        r',?\s*\b(?:Co\.?,?\s*Ltd\.?|Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|PLC|S\.A\.S?\.?|S\.A\.R\.L\.?|SA|SAS|SARL|N\.V\.?|NV|B\.V\.?|BV|S\.p\.A\.?|SpA|AG|GmbH|KGaA|SE|AB|ASA|Oyj|LLC|PBC|Holdings)(?=\s|$|[,\.])\.?',
         '', name, flags=re.IGNORECASE
     )
     return " ".join(cleaned.strip(" ,.").split())
@@ -386,10 +160,11 @@ def extract_nested_sections(sections: List[Any], depth: int = 0) -> str:
                 
     return "\n\n".join(text_blocks)
 
-def fetch_verified_media_profile(company_name: str) -> Dict[str, Any]:
+def fetch_verified_media_profile(company_name: str, business_summary: str = "") -> Dict[str, Any]:
     """
-    Fallback for private or emerging technology enterprises not on Wikipedia (e.g. 10Pearls, Emumba).
-    Scrapes targeted Google News RSS feeds to extract real commercial milestones, acquisitions, and offerings.
+    Domain-agnostic fallback for enterprises not matched on Wikipedia.
+    NEVER injects fabricated IT/cloud consulting boilerplate ('Enterprise Product Engineering', 'Cloud Infrastructure', 'Digital Modernization').
+    Uses live market-feed `business_summary` when available, alongside recent verified headlines; leaves `verified_segments` empty unless verified.
     """
     clean = company_name.strip()
     encoded = requests.utils.quote(f'"{clean}"')
@@ -412,34 +187,50 @@ def fetch_verified_media_profile(company_name: str) -> Dict[str, Any]:
     except Exception:
         pass
 
+    clean_biz = (business_summary or "").strip()
+    if clean_biz:
+        overview_block = f"## Verified Market-Feed Corporate Overview\n{clean_biz}"
+        summary = clean_biz
+    else:
+        overview_block = (
+            f"## Enterprise Profile\n"
+            f"{clean} is an operating commercial enterprise. Detailed corporate history and formal reporting segment breakdown were not retrieved from Wikipedia; "
+            f"refer to the company's official Investor Relations disclosures and audited annual filings."
+        )
+        summary = (
+            f"{clean} is an established commercial enterprise with verified public announcements including: "
+            + "; ".join([a.split("(")[0].replace("- **", "").replace("**", "").strip() for a in announcements[:3]])
+            if announcements else f"{clean} is an active commercial enterprise (segment breakdown not retrieved from public Wikipedia records)."
+        )
+
     if announcements:
         detailed_body = (
+            f"{overview_block}\n\n"
             f"## Verified Commercial Disclosures & Operating Milestones\n"
             f"Recent verified public press releases and commercial announcements for {clean}:\n"
             + "\n".join(announcements)
-            + f"\n\n## Enterprise Overview\n"
-            f"{clean} operates as an established commercial technology firm delivering digital transformation, software product engineering, cloud modernization, and strategic enterprise consulting."
         )
-        summary = f"{clean} is an established commercial enterprise with verified strategic announcements including: " + "; ".join([a.split("(")[0].replace("- **", "").replace("**", "").strip() for a in announcements[:3]])
     else:
-        detailed_body = (
-            f"## Enterprise Profile\n"
-            f"{clean} is an active commercial enterprise operating within the technology, software engineering, and consulting domain. "
-            f"The organization delivers tailored digital solutions, cloud infrastructure, and enterprise application modernization."
-        )
-        summary = f"{clean} operates as an active commercial technology enterprise providing digital engineering, software architecture, and enterprise services."
+        detailed_body = overview_block
+
+    # Try to extract founding year from market-feed business_summary if present
+    founding_info = ""
+    if clean_biz:
+        fm = re.search(r'(?:founded|established|incorporated)\s+(?:in|on)\s+([0-9]{4})', clean_biz, re.IGNORECASE)
+        if fm:
+            founding_info = f"Founded in {fm.group(1)}"
 
     profile = {
-        "founding_info": "",
+        "founding_info": founding_info,
         "verified_leadership": [],
         "verified_acquisitions": [],
-        "verified_segments": ["Enterprise Product Engineering", "Cloud Infrastructure", "Digital Modernization"]
+        "verified_segments": []
     }
     return {
         "status": "success",
-        "source": "Verified Corporate Disclosures & Media Profile",
+        "source": "Verified Market Feed & Media Profile" if clean_biz else "Verified Corporate Disclosures & Media Profile",
         "company": clean,
-        "url": f"https://news.google.com/search?q={encoded}",
+        "url": announcements[0].split("(")[-1].rstrip(")") if (announcements and "http" in announcements[0]) else "",
         "summary": summary,
         "detailed_content": detailed_body,
         "entity_profile": profile
@@ -659,7 +450,7 @@ def extract_private_financial_profile(text: str) -> Dict[str, Any]:
         re.IGNORECASE
     )
     rev_pat = re.compile(r'\b(annualized\s+revenue|run\s+rate|\bARR\b|revenue\s+(?:of|reached|hit|grew|exceeded|was|surpassed|topped)|recognized\s+revenue)\b.*\$[0-9]|\$[0-9][^\.\n]{0,35}\b(in\s+(?:annual(?:ized)?\s+)?revenue|ARR|run\s+rate)\b', re.IGNORECASE)
-    ipo_pat = re.compile(r'\b(cash\s+burn|net\s+loss|operating\s+loss|profitab(?:le|ility)|IPO|initial\s+public\s+offering|public\s+benefit\s+corporation|PBC)\b', re.IGNORECASE)
+    ipo_pat = re.compile(r'\b(cash\s+burn|net\s+loss|operating\s+loss|profitab(?:le|ility)|IPO|initial\s+public\s+offering|Form\s+S-1|\bS-1\b|confidentially\s+filed|publicly\s+filed|public\s+benefit\s+corporation|PBC)\b', re.IGNORECASE)
 
     # Detect segment / single-product-line revenue qualifiers so a sub-unit ARR (e.g. $1B Ads ARR) never replaces total company ARR
     segment_qual_pat = re.compile(
@@ -805,10 +596,24 @@ def extract_private_financial_profile(text: str) -> Dict[str, Any]:
             sn_lbl = sn[6] or "Segment"
             latest_rev_label += f"; {sn[7]} {sn_lbl} ARR{_date_tag(sn[2], sn[8])}"
 
+    ipo_status_headline = ""
+    for yr, mo, sent in ipo_entries:
+        if re.search(r'\b(Form\s+S-1|S-1|filed\s+(?:confidentially|publicly)?\s*(?:for\s+an?\s+)?IPO|IPO\s+filing)\b', sent, re.IGNORECASE):
+            exch_m = re.search(r'\b(NYSE|NASDAQ)\b', sent, re.IGNORECASE)
+            tick_m = re.search(r'\bticker(?:\s+symbol)?\s+["\']?([A-Z]{2,5})["\']?\b', sent)
+            if exch_m and tick_m:
+                ipo_status_headline = f"Form S-1 Filed ({exch_m.group(1).upper()}: {tick_m.group(1)})"
+            elif re.search(r'confidential', sent, re.IGNORECASE):
+                ipo_status_headline = f"Confidential IPO / S-1 Filing{f' ({yr})' if yr else ''}"
+            else:
+                ipo_status_headline = f"Form S-1 / IPO Filing Active{f' ({yr})' if yr else ''}"
+            break
+
     return {
         "latest_valuation_headline": latest_val_label,
         "latest_funding_headline": latest_fund_label,
         "latest_revenue_headline": latest_rev_label,
+        "ipo_status_headline": ipo_status_headline,
         "valuations": _top_unique(val_entries, 6, 5),
         "funding_rounds": _top_unique(fund_entries, 5, 5),
         "revenue_and_arr": _top_unique(rev_entries, 9, 5),
@@ -872,18 +677,25 @@ def matches_resolved_entity_page(page, resolved_entity: Optional[Dict[str, Any]]
         if len(neg_low) >= 3 and (neg_low in title_low or neg_low in first_para):
             return False
 
-    # 2. Positive verification against headquarters, sector, parent, or required anchors
+    # 2. Positive verification against stripped trade name (multi-word/distinct), headquarters, sector, or required anchors
     hq_tokens = [t.strip().lower() for t in re.split(r'[,\s]+', resolved_entity.get("headquarters", "")) if len(t.strip()) >= 3 and t.strip().lower() != "global"]
     sector_tokens = [t.strip().lower() for t in re.split(r'[\s,&/\-]+', resolved_entity.get("sector", "")) if len(t.strip()) >= 4 and t.strip().lower() not in ("services", "commercial", "solutions")]
     anchor_tokens = [a.lower() for a in (resolved_entity.get("required_search_anchors") or []) if len(a) >= 3]
+    stripped_trade = _strip_legal_suffixes(resolved_entity.get("trade_name") or resolved_entity.get("canonical_name") or "").lower()
+    if stripped_trade and len(stripped_trade.split()) >= 2:
+        anchor_tokens.append(stripped_trade)
 
     check_pool = hq_tokens + sector_tokens + anchor_tokens
     if check_pool:
-        if not any(tok in full_summary for tok in check_pool):
+        if not any(tok in full_summary or tok in title_low for tok in check_pool):
             return False
     return True
 
-def get_company_biography(company_name: str, resolved_entity: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def get_company_biography(
+    company_name: str,
+    resolved_entity: Optional[Dict[str, Any]] = None,
+    business_summary: str = ""
+) -> Dict[str, Any]:
     """
     Fetch comprehensive, deep corporate history, founding milestones, subsidiaries, and business model.
     1. If ResolvedEntity provides an exact wikipedia_title (e.g. 'Jazz_(mobile_network_operator)', 'Zong_4G'),
@@ -893,13 +705,13 @@ def get_company_biography(company_name: str, resolved_entity: Optional[Dict[str,
     4. Falls back to Authoritative Corporate Registry or verified media profile when offline/unlisted.
     """
     user_agent = "MarketIntelAgent/2.0 (https://github.com/multi-agent-project; contact@example.com)"
-    wiki = wikipediaapi.Wikipedia(user_agent=user_agent, language="en")
+    wiki = wikipediaapi.Wikipedia(user_agent=user_agent, language="en") if wikipediaapi is not None else None
     
     page = None
     exact_wiki_title = (resolved_entity.get("wikipedia_title") or "").strip() if resolved_entity else ""
 
     # 0. Exact pre-flight verified Wikipedia title fetch FIRST (prevents bare 'Jazz'/'Zong' collisions!)
-    if exact_wiki_title:
+    if exact_wiki_title and wiki is not None:
         for title_try in [exact_wiki_title, exact_wiki_title.replace("_", " ")]:
             try:
                 p = wiki.page(title_try)
@@ -911,7 +723,7 @@ def get_company_biography(company_name: str, resolved_entity: Optional[Dict[str,
                 pass
 
     # 1. Search Wikipedia OpenSearch using anchored query (never bare single-word ambiguous query when anchors exist)
-    if page is None:
+    if page is None and wiki is not None:
         search_target = company_name
         if resolved_entity and len(company_name.split()) == 1 and resolved_entity.get("required_search_anchors"):
             search_target = resolved_entity["required_search_anchors"][0]
@@ -943,64 +755,12 @@ def get_company_biography(company_name: str, resolved_entity: Optional[Dict[str,
             except Exception:
                 pass
             
-    # Helper to find authoritative registry match (respecting ResolvedEntity so 'Jazz Pharmaceuticals' never matches 'jazz' Pakistan!)
-    norm_candidates = [company_name.lower().strip()]
-    if resolved_entity:
-        norm_candidates.extend([
-            (resolved_entity.get("canonical_name") or "").lower().strip(),
-            (resolved_entity.get("trade_name") or "").lower().strip(),
-            (resolved_entity.get("wikipedia_title") or "").lower().replace("_", " ").strip()
-        ])
-    reg_match = None
-    for reg_key, reg_data in VERIFIED_CORPORATE_REGISTRY.items():
-        # Guard: never match Pakistan telecom 'jazz' when resolved entity is Jazz Pharmaceuticals
-        if reg_key == "jazz" and resolved_entity and "pharma" in (resolved_entity.get("sector") or "").lower():
-            continue
-        if any(reg_key == nc or (len(reg_key) >= 4 and reg_key in nc) for nc in norm_candidates if nc):
-            reg_match = reg_data
-            break
-
     # If valid Wikipedia corporate page found
     if page and page.exists():
         summary = page.summary.strip()
         detailed_body = extract_nested_sections(page.sections)
         full_dossier_text = f"## Corporate Overview\n{summary}\n\n{detailed_body}"
-        
         profile = extract_structured_entity_profile(page.title, summary, detailed_body)
-        
-        # Reconcile extracted profile with fallback registry:
-        # Live Wikipedia Infobox officers take priority=1 (freshest live source);
-        # registry officers act as priority=2 fallback if Infobox is missing/incomplete.
-        if reg_match:
-            reg_prof = reg_match.get("entity_profile", {})
-            reg_officers = []
-            for raw_off in reg_prof.get("verified_leadership", []):
-                parsed = parse_officer_string(raw_off, source="Authoritative Registry", priority=2)
-                if parsed:
-                    reg_officers.append(parsed)
-            wiki_officers = []
-            for o in profile.get("active_officers", []):
-                vo = VerifiedOfficer(**o)
-                if vo.source == "Wikipedia Infobox":
-                    vo.priority = 1
-                wiki_officers.append(vo)
-            merged_officers = reconcile_officers(
-                wiki_officers + reg_officers,
-                breaking_governance=reg_prof.get("breaking_governance", [])
-            )
-            profile["active_officers"] = [o.model_dump() for o in merged_officers]
-            profile["verified_leadership"] = [o.formatted() for o in merged_officers]
-            if reg_prof.get("verified_segments"):
-                profile["verified_segments"] = reg_prof["verified_segments"]
-            if reg_prof.get("verified_acquisitions"):
-                profile["verified_acquisitions"] = reg_prof["verified_acquisitions"]
-            if reg_prof.get("breaking_governance"):
-                profile["breaking_governance"] = reg_prof["breaking_governance"]
-            if reg_prof.get("breaking_regulatory"):
-                profile["breaking_regulatory"] = reg_prof["breaking_regulatory"]
-            if reg_prof.get("founding_info") and not profile.get("founding_info"):
-                profile["founding_info"] = reg_prof["founding_info"]
-
         return {
             "status": "success",
             "source": "Wikipedia",
@@ -1011,20 +771,8 @@ def get_company_biography(company_name: str, resolved_entity: Optional[Dict[str,
             "entity_profile": profile
         }
 
-    # If Wikipedia lookup didn't succeed (offline sandbox, rate limit, or not listed), check authoritative registry
-    if reg_match:
-        return {
-            "status": "success",
-            "source": "Authoritative Corporate Registry",
-            "company": reg_match["company"],
-            "url": reg_match["url"],
-            "summary": reg_match["summary"],
-            "detailed_content": f"## Corporate Overview\n{reg_match['summary']}\n\n## Official Business Architecture\n" + "\n".join([f"### {seg}" for seg in reg_match["entity_profile"].get("verified_segments", [])]),
-            "entity_profile": reg_match["entity_profile"]
-        }
-
-    # Fallback for emerging or private enterprises not yet on Wikipedia (e.g., 10Pearls, JazzWorld, Emumba)
-    return fetch_verified_media_profile(company_name)
+    # Fallback for emerging or private enterprises not yet on Wikipedia
+    return fetch_verified_media_profile(company_name, business_summary=business_summary)
 
 if __name__ == "__main__":
     res = get_company_biography("NETSOL Technologies Inc.")

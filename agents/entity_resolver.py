@@ -141,6 +141,31 @@ CURATED_RESOLVED_ENTITIES: Dict[str, Dict[str, Any]] = {
         "required_search_anchors": ["Jazz Pharmaceuticals", "NASDAQ: JAZZ", "biopharma", "oncology", "neuroscience"],
         "negative_keywords": ["Jazz Pakistan", "VEON", "JazzCash", "Utah Jazz", "NBA", "music"],
         "subsidiary_kpis": {}
+    },
+    "motive": {
+        "canonical_name": "Motive Technologies, Inc.",
+        "trade_name": "Motive",
+        "legal_entity_name": "Motive Technologies, Inc. (formerly KeepTruckin, Inc.)",
+        "entity_type": "PRIVATE",
+        "ticker": None,
+        "parent_company": None,
+        "parent_ticker": None,
+        "ownership_pct": "Privately Held Enterprise (Form S-1 Filer — Proposed NYSE: MTVE)",
+        "local_currency": "USD",
+        "sector": "AI Fleet Management, Physical Operations & Commercial Telematics",
+        "headquarters": "San Francisco, California",
+        "wikipedia_title": "Motive_(company)",
+        "required_search_anchors": [
+            "Motive Technologies", "KeepTruckin", "Shoaib Makani",
+            "fleet", "telematics", "dashcam", "Samsara", "MTVE"
+        ],
+        "negative_keywords": [
+            "possible motive", "ulterior motive", "motive behind", "motive for",
+            "profit motive", "home invasion", "hammer attack", "murder", "homicide",
+            "police discuss", "police investigate", "shooting", "stabbing", "true crime",
+            "People.com", "Toronto Police"
+        ],
+        "subsidiary_kpis": {}
     }
 }
 
@@ -171,6 +196,13 @@ ENTITY_ALIASES: Dict[str, str] = {
     "005930.ks": "samsung",
     "jazz pharmaceuticals": "jazz pharmaceuticals",
     "jazz pharma": "jazz pharmaceuticals",
+    "motive": "motive",
+    "motive technologies": "motive",
+    "motive technologies inc": "motive",
+    "motive technologies, inc.": "motive",
+    "keeptruckin": "motive",
+    "keep truckin": "motive",
+    "mtve": "motive",
 }
 
 
@@ -232,13 +264,18 @@ and return ONLY valid JSON matching the requested schema (no prose, no markdown 
             exchange = data.get("exchange") or ""
 
             clean_trade = re.sub(
-                r',?\s*\b(?:Co\.?,?\s*Ltd\.?|Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|PLC|S\.A\.|N\.V\.|AG|GmbH|SE|LLC|PBC|Holdings)\b\.?',
+                r',?\s*\b(?:Co\.?,?\s*Ltd\.?|Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|PLC|S\.A\.S?\.?|S\.A\.R\.L\.?|SA|SAS|SARL|N\.V\.?|NV|B\.V\.?|BV|S\.p\.A\.?|SpA|AG|GmbH|KGaA|SE|AB|ASA|Oyj|LLC|PBC|Holdings)(?=\s|$|[,\.])\.?',
                 '', official_name, flags=re.IGNORECASE
             ).strip(" ,.") or raw
 
+            hq_parts = [p for p in [data.get("headquarters_city"), data.get("headquarters_country")] if p]
+            inferred_hq = ", ".join(hq_parts) if hq_parts else (region_hint or "Global")
+
             anchors = []
-            if clean_trade:
+            if clean_trade and len(clean_trade.split()) > 1:
                 anchors.append(clean_trade)
+            if official_name and official_name.lower() != clean_trade.lower() and official_name not in anchors:
+                anchors.append(official_name)
             if symbol and symbol != "PRIVATE / UNLISTED":
                 anchors.append(symbol)
             if sector and sector not in anchors:
@@ -247,9 +284,13 @@ and return ONLY valid JSON matching the requested schema (no prose, no markdown 
                 anchors.append(industry.split("&")[0].strip())
             if region_hint:
                 anchors.append(region_hint)
+            if not anchors:
+                anchors.extend([f"{clean_trade} company", f"{clean_trade} corporate", f"{clean_trade} enterprise"])
 
             negatives = ["album", "song", "band", "movie", "novel", "obituary"]
-            # Build clean Wikipedia title candidate
+            if len(clean_trade.split()) == 1:
+                negatives.extend(["murder", "homicide", "home invasion", "shooting", "stabbing", "police discuss", "true crime"])
+            # Build clean Wikipedia title candidate (stripped of SA/SE/NV/Inc/Ltd)
             wiki_title = clean_trade.replace(" ", "_")
 
             return ResolvedEntity(
@@ -263,10 +304,10 @@ and return ONLY valid JSON matching the requested schema (no prose, no markdown 
                 ownership_pct=f"Publicly Traded Corporation ({exchange}: {symbol})" if is_public else "Privately Held Enterprise",
                 local_currency=(data.get("current_price", "USD").split()[-1] if is_public and data.get("current_price", "N/A") != "N/A" else "USD"),
                 sector=sector,
-                headquarters=region_hint or "Global",
+                headquarters=inferred_hq,
                 wikipedia_title=wiki_title,
                 required_search_anchors=list(dict.fromkeys([a for a in anchors if a])),
-                negative_keywords=negatives,
+                negative_keywords=list(dict.fromkeys(negatives)),
                 subsidiary_kpis={}
             )
 
@@ -277,7 +318,8 @@ and return ONLY valid JSON matching the requested schema (no prose, no markdown 
 Return ONLY a JSON object with keys:
 canonical_name, trade_name, legal_entity_name, entity_type ("PUBLIC"|"PRIVATE"|"SUBSIDIARY"), ticker (string or null),
 parent_company (string or null), parent_ticker (string or null), local_currency, sector, headquarters,
-wikipedia_title, required_search_anchors (list of 3-5 strings), negative_keywords (list of 3-5 unrelated collision terms)."""
+wikipedia_title, required_search_anchors (list of 4-6 distinct domain/product/company anchors — NEVER include the bare single word '{raw}' alone),
+negative_keywords (list of 5-8 unrelated collision terms, including common English noun phrases or crime/entertainment collisions if '{raw}' is a common dictionary word)."""
                 resp = self.generate_response(prompt)
                 m = re.search(r'\{.*\}', resp, re.DOTALL)
                 if m:
@@ -288,6 +330,9 @@ wikipedia_title, required_search_anchors (list of 3-5 strings), negative_keyword
                 pass
 
         # Safe universal fallback
+        fallback_negatives = ["album", "song", "band", "movie", "obituary"]
+        if len(raw.split()) == 1:
+            fallback_negatives.extend(["murder", "homicide", "home invasion", "shooting", "police discuss", "true crime"])
         return ResolvedEntity(
             canonical_name=raw,
             trade_name=raw,
@@ -297,6 +342,6 @@ wikipedia_title, required_search_anchors (list of 3-5 strings), negative_keyword
             sector=industry_hint or "Commercial Technology & Services",
             headquarters=region_hint or "Global",
             wikipedia_title=raw.replace(" ", "_"),
-            required_search_anchors=[raw, f"{raw} company", f"{raw} corporate"],
-            negative_keywords=["album", "song", "band", "movie", "obituary"]
+            required_search_anchors=[f"{raw} Technologies", f"{raw} company", f"{raw} corporate", f"{raw} software"],
+            negative_keywords=fallback_negatives
         )

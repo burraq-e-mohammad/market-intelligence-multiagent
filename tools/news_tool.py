@@ -106,36 +106,66 @@ def build_anchored_news_query(
     """
     Construct a strict boolean Google News query using ResolvedEntity anchors,
     negative keyword exclusions, and recency window.
-    Prevents bare single-word queries like 'Jazz' or 'Zong' from matching NBA, music, or 1781 ships.
+    Prevents bare single-word queries like 'Motive', 'Jazz', or 'Zong' from matching
+    common English nouns, true-crime stories, NBA teams, music, or 1781 ships.
     """
     trade = (resolved_entity.get("trade_name") or clean_name).strip() if resolved_entity else clean_name
-    anchors = list(resolved_entity.get("required_search_anchors") or []) if resolved_entity else []
+    trade_low = trade.lower()
+    raw_anchors = list(resolved_entity.get("required_search_anchors") or []) if resolved_entity else []
     negatives = list(resolved_entity.get("negative_keywords") or []) if resolved_entity else []
 
-    if resolved_entity and anchors:
-        # Combine trade_name with required anchors in strict boolean form
-        anchor_terms = [f'"{a}"' if " " in a else a for a in anchors[:5]]
-        hq = (resolved_entity.get("headquarters") or "").split(",")[-1].strip()
-        if hq and hq.lower() != "global" and not any(hq.lower() in a.lower() for a in anchors[:5]):
-            anchor_terms.append(f'"{hq}"')
-        base = f'("{trade}" AND ({" OR ".join(anchor_terms)}))'
-        if resolved_entity.get("entity_type") == "SUBSIDIARY":
-            # Also allow exact legal/brand anchor hits (e.g. "JazzCash" OR "CMPak" OR "Zong 4G")
-            strong_aliases = [f'"{a}"' for a in anchors[:3] if a.lower() != trade.lower()]
-            if strong_aliases:
-                base = f'({base} OR {" OR ".join(strong_aliases)})'
-    else:
-        base = f'"{clean_name}"'
-        if symbol and symbol != "PRIVATE / UNLISTED":
-            clean_sym = symbol.split(".")[0]
-            base += f' OR "{symbol}"'
-            if len(clean_sym) >= 3:
-                base += f' OR "{clean_sym}"'
-        base = f'({base})'
+    # Filter out bare trade name itself from anchors so ("Motive" AND ("Motive" OR ...)) NEVER collapses to bare "Motive"!
+    distinct_anchors = [a.strip() for a in raw_anchors if a and a.strip().lower() != trade_low]
 
-    # Append negative exclusions (e.g. -"Jazz Pharmaceuticals" -"Utah Jazz" -NBA)
+    if resolved_entity and distinct_anchors:
+        # Separate standalone strong brand aliases (e.g. "Motive Technologies", "KeepTruckin", "JazzCash", "CMPak")
+        # from contextual domain keywords (e.g. "fleet", "telematics", "dashcam", "Shoaib Makani")
+        strong_aliases = []
+        context_anchors = []
+        for a in distinct_anchors:
+            a_low = a.lower()
+            is_brand_alias = (
+                (trade_low in a_low and len(a.split()) >= 2)  # e.g. "Motive Technologies", "Jazz Pakistan"
+                or a_low in ("keeptruckin", "jazzcash", "cmpak", "jazzworld", "pmcl", "ptml")
+                or (a.isupper() and len(a) >= 3 and a_low not in ("pta", "hbm", "ipo", "ceo", "cfo"))
+            )
+            if is_brand_alias and len(strong_aliases) < 3:
+                strong_aliases.append(f'"{a}"' if " " in a else a)
+            else:
+                context_anchors.append(f'"{a}"' if " " in a else a)
+
+        if not context_anchors:
+            # Fall back to sector / HQ tokens so ("Trade" AND (...)) is always strictly anchored
+            hq = (resolved_entity.get("headquarters") or "").split(",")[-1].strip()
+            sec = (resolved_entity.get("sector") or "").split("&")[0].strip()
+            if sec and sec.lower() != trade_low:
+                context_anchors.append(f'"{sec}"' if " " in sec else sec)
+            if hq and hq.lower() not in ("global", trade_low):
+                context_anchors.append(f'"{hq}"' if " " in hq else hq)
+            if not context_anchors:
+                context_anchors = ["company", "software", "enterprise", "revenue"]
+
+        trade_clause = f'("{trade}" AND ({" OR ".join(context_anchors[:5])}))'
+        if strong_aliases:
+            base = f'({" OR ".join(strong_aliases)} OR {trade_clause})'
+        else:
+            base = trade_clause
+    else:
+        if len(clean_name.split()) == 1 and (not symbol or symbol == "PRIVATE / UNLISTED"):
+            # Never search a bare single-word dictionary name without corporate anchors
+            base = f'("{clean_name}" AND (company OR startup OR software OR earnings OR revenue OR IPO OR funding))'
+        else:
+            base = f'"{clean_name}"'
+            if symbol and symbol != "PRIVATE / UNLISTED":
+                clean_sym = symbol.split(".")[0]
+                base += f' OR "{symbol}"'
+                if len(clean_sym) >= 3:
+                    base += f' OR "{clean_sym}"'
+            base = f'({base})'
+
+    # Append negative exclusions (e.g. -"possible motive" -"Jazz Pharmaceuticals" -"Utah Jazz" -NBA)
     neg_clauses = []
-    for neg in negatives[:8]:
+    for neg in negatives[:10]:
         n_clean = neg.strip()
         if not n_clean:
             continue
@@ -155,55 +185,93 @@ def is_relevant_article(
 ) -> bool:
     """
     Strict pre-synthesis relevance filter:
-    1. Hard-drops any article containing negative keywords (e.g. Utah Jazz, Jazz Pharmaceuticals, slave ship, Wahaha, obituary).
-    2. Drops tangential viral soundbites without material policy/business substance.
-    3. Verifies entity match AND (for ambiguous/subsidiary entities) sector/geography/anchor match.
+    1. Hard-drops any article containing negative keywords (e.g. possible motive, home invasion, Utah Jazz, slave ship).
+    2. Guards common English dictionary words & single-word brand names against true-crime, tabloid, and noun-phrase collisions.
+    3. Drops tangential viral soundbites without material policy/business substance.
+    4. Verifies entity match AND (for ambiguous/single-word/subsidiary entities) genuine domain/anchor match.
     """
     combined = f"{title} {snippet}".lower()
     title_lower = title.lower()
     clean_name_lower = clean_name.lower()
     clean_sym = symbol.split(".")[0].lower() if (symbol and symbol != "PRIVATE / UNLISTED") else ""
+    trade_lower = (resolved_entity.get("trade_name") or clean_name).lower().strip() if resolved_entity else clean_name_lower
+    canonical_lower = (resolved_entity.get("canonical_name") or clean_name).lower().strip() if resolved_entity else clean_name_lower
+    anchors_lower = [a.lower().strip() for a in (resolved_entity.get("required_search_anchors") or []) if a and a.strip().lower() != trade_lower] if resolved_entity else []
 
-    # 1. Hard negative-keyword exclusion
+    # 1. Hard negative-keyword exclusion (supports both single words and multi-word phrases)
     if resolved_entity:
         for neg in (resolved_entity.get("negative_keywords") or []):
             n_low = neg.lower().strip()
             if len(n_low) >= 3 and re.search(rf'\b{re.escape(n_low)}\b', combined):
                 return False
 
-    # 2. Skip non-material viral political soundbites / tangential gossip
+    # 2. Universal Common-Noun & Violent-Crime / Tabloid Collision Guard for single-word brand names
+    # Prevents e.g. "Toronto Police Discuss Possible Motive Behind 'Brutal' Home Invasion and Hammer Attack on CEO Family - People.com"
+    is_single_word_brand = len(trade_lower.split()) == 1
+    strong_brand_present = (
+        (canonical_lower != trade_lower and len(canonical_lower) > len(trade_lower) + 2 and canonical_lower.split(",")[0].strip() in combined)
+        or (clean_sym and len(clean_sym) >= 3 and bool(re.search(rf'\b{re.escape(clean_sym)}\b', combined)))
+        or any(
+            (trade_lower in a and len(a.split()) >= 2 and a in combined)
+            or (a in ("keeptruckin", "jazzcash", "cmpak", "shoaib makani", "samsara", "mtve") and a in combined)
+            for a in anchors_lower
+        )
+    )
+
+    if is_single_word_brand and not strong_brand_present:
+        # 2a. Reject common-noun English idioms where the brand word is clearly used as an ordinary noun (not a company)
+        noun_idiom_pat = re.compile(
+            rf'\b(?:possible|ulterior|profit|hidden|clear|primary|real|true|secret|political|alleged|suspected|unknown|no|any|his|her|their|the|a)\s+{re.escape(trade_lower)}\b'
+            rf'|\b{re.escape(trade_lower)}\s+(?:behind|for|in\s+the|of\s+the|to\s+kill|unknown)\b',
+            re.IGNORECASE
+        )
+        if noun_idiom_pat.search(title) or noun_idiom_pat.search(combined):
+            return False
+
+        # 2b. Reject violent crime / police / tabloid stories that accidentally mention a generic word + "CEO"
+        crime_tabloid_pat = re.compile(
+            r'\b(home\s+invasion|hammer\s+attack|murder|homicide|manslaughter|shooting|stabbing|assault\s+on|'
+            r'police\s+discuss|police\s+investigate|police\s+say|suspect\s+arrested|arrested\s+for|'
+            r'brutal\s+attack|true\s+crime|people\.com|tmz|daily\s+mail)\b',
+            re.IGNORECASE
+        )
+        if crime_tabloid_pat.search(combined):
+            return False
+
+    # 3. Skip non-material viral political soundbites / tangential gossip
     is_material_policy = bool(re.search(r'\b(tariff|antitrust|doj|ftc|sec|eu|dma|probe|lawsuit|export|sanction|ban|fine|settlement|regulator|pta|spectrum|5g)\b', title_lower))
     is_tangential_soundbite = bool(re.search(r'\b(should\s+replace|is\s+[\'"]?a\s+legend[\'"]?|calls\s+[\w\s]+\s+a\s+legend|mistakenly\s+calls|gaffe|quips|obituary)\b', title_lower))
     if is_tangential_soundbite and not is_material_policy:
         return False
 
-    # 3. False prefix guard for 'Systems Limited'
+    # 4. False prefix guard for 'Systems Limited'
     m = re.search(r'([A-Za-z0-9]+)\s+Systems\s+Limited', title, re.IGNORECASE)
     if m and clean_name_lower == "systems limited":
         prev_word = m.group(1).lower()
         if prev_word not in ['the', 'at', 'in', 'of', 'for', 'about', 'and', 'from', 'with', 'to']:
             return False
 
-    # 4. Positive entity + anchor/sector/geography match
-    trade_lower = (resolved_entity.get("trade_name") or clean_name).lower() if resolved_entity else clean_name_lower
-    anchors_lower = [a.lower() for a in (resolved_entity.get("required_search_anchors") or [])] if resolved_entity else []
-
+    # 5. Positive entity + anchor/sector/geography match
     mentions_entity = (
         clean_name_lower in combined
-        or trade_lower in combined
+        or bool(re.search(rf'\b{re.escape(trade_lower)}\b', combined))
         or (clean_sym and len(clean_sym) >= 3 and bool(re.search(rf'\b{re.escape(clean_sym)}\b', combined)))
         or any(a in combined for a in anchors_lower[:3])
     )
     if not mentions_entity:
         return False
 
-    # For short/ambiguous names or subsidiaries, require at least one domain/geography/anchor hit!
-    if resolved_entity and (resolved_entity.get("entity_type") == "SUBSIDIARY" or len(trade_lower.split()) == 1):
-        hq_tokens = [t.strip().lower() for t in re.split(r'[,\s]+', resolved_entity.get("headquarters", "")) if len(t.strip()) >= 3 and t.strip().lower() != "global"]
-        sector_tokens = [t.strip().lower() for t in re.split(r'[\s,&/\-]+', resolved_entity.get("sector", "")) if len(t.strip()) >= 4 and t.strip().lower() not in ("services", "commercial", "solutions")]
+    # For short/single-word names or subsidiaries, require at least one genuine domain/business/anchor hit!
+    # Note: NEVER include generic non-company words like "ceo" alone here (crime stories can mention a victim "CEO").
+    if resolved_entity and (resolved_entity.get("entity_type") == "SUBSIDIARY" or is_single_word_brand):
+        hq_tokens = [t.strip().lower() for t in re.split(r'[,\s]+', resolved_entity.get("headquarters", "")) if len(t.strip()) >= 3 and t.strip().lower() not in ("global", "san")]
+        sector_tokens = [t.strip().lower() for t in re.split(r'[\s,&/\-]+', resolved_entity.get("sector", "")) if len(t.strip()) >= 4 and t.strip().lower() not in ("services", "commercial", "solutions", "physical", "operations", "management")]
         parent_tokens = [t.strip().lower() for t in re.split(r'[\s\(\):,\-]+', resolved_entity.get("parent_company") or "") if len(t.strip()) >= 4 and t.strip().lower() not in ("limited", "ltd", "nasdaq", "sehk", "group")]
-        domain_pool = set(anchors_lower + hq_tokens + sector_tokens + parent_tokens + ["telecom", "4g", "5g", "broadband", "subscriber", "fintech", "pta", "earnings", "revenue", "ceo"])
-        # Exclude bare trade name itself from domain_pool so 'Jazz' alone isn't enough!
+        corp_signals = ["earnings", "revenue", "ipo", "s-1", "funding", "valuation", "acquisition", "quarterly", "software", "platform", "enterprise", "ai ", "dashcam", "telematics", "fleet", "saas", "lawsuit", "patent"]
+        if resolved_entity.get("entity_type") == "SUBSIDIARY":
+            corp_signals.extend(["telecom", "4g", "5g", "broadband", "subscriber", "fintech", "pta"])
+        domain_pool = set(anchors_lower + hq_tokens + sector_tokens + parent_tokens + corp_signals)
+        # Exclude bare trade name itself from domain_pool so 'Motive' or 'Jazz' alone isn't enough!
         domain_pool.discard(trade_lower)
         if domain_pool and not any(tok in combined for tok in domain_pool):
             return False
@@ -274,7 +342,7 @@ def get_company_news(
 
     # 1a. High-signal stream (30-day recency, boolean anchors & negative exclusions)
     base_30d = build_anchored_news_query(clean_name, symbol=symbol, resolved_entity=resolved_entity, recency="when:30d")
-    catalyst_query = f'{base_30d} (earnings OR revenue OR EPS OR guidance OR 5G OR spectrum OR CEO OR resigns OR appointed OR investigation OR partnership)'
+    catalyst_query = f'{base_30d} (earnings OR revenue OR IPO OR "S-1" OR funding OR acquisition OR partnership OR lawsuit OR launch OR guidance OR 5G OR spectrum)'
     articles.extend(_fetch_google_rss_stream(catalyst_query, clean_name, symbol, limit=max(4, max_results // 2), existing_titles=seen_titles, resolved_entity=resolved_entity))
 
     # 1b. General anchored breaking headlines stream (30-day recency)
@@ -291,7 +359,8 @@ def get_company_news(
     is_subsidiary = resolved_entity and resolved_entity.get("entity_type") == "SUBSIDIARY"
     if not is_subsidiary and len(articles) < max_results and symbol and symbol != "PRIVATE / UNLISTED":
         try:
-            ticker = yf.Ticker(symbol)
+            from tools.finance_tool import get_yf_session
+            ticker = yf.Ticker(symbol, session=get_yf_session())
             for item in (ticker.news or [])[:max_results]:
                 if len(articles) >= max_results:
                     break

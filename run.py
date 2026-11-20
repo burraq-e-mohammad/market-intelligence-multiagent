@@ -5,6 +5,27 @@ import argparse
 import os
 import re
 
+def ensure_venv():
+    """If run with system Python outside the project virtual environment, auto-route to the project venv."""
+    if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(here, "venv", "Scripts", "python.exe"),
+            os.path.join(here, ".venv", "Scripts", "python.exe"),
+            os.path.join(here, "venv", "bin", "python"),
+            os.path.join(here, ".venv", "bin", "python"),
+        ]
+        for cand in candidates:
+            if os.path.isfile(cand):
+                print(f"🔄 Switching to project virtual environment: {cand}")
+                try:
+                    code = subprocess.call([cand] + sys.argv)
+                    sys.exit(code)
+                except KeyboardInterrupt:
+                    sys.exit(0)
+
+ensure_venv()
+
 def free_port(port: int):
     """Terminate any stale process currently listening on the given port (Windows/Unix)."""
     try:

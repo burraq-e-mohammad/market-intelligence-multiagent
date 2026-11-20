@@ -3,10 +3,14 @@ from agents.entity_resolver import EntityResolverAgent
 from agents.financial_agent import FinancialAnalystAgent
 from agents.news_agent import NewsScoutAgent
 from agents.biography_agent import BiographyAgent
-from agents.qa_critic import QualityAssuranceAgent
+try:
+    from agents.qa_validator_agent import QualityAssuranceAgent
+except ImportError:
+    from agents.qa_critic import QualityAssuranceAgent
 from tools.finance_tool import get_financial_metrics
 from tools.wiki_tool import get_company_biography
 from tools.pdf_tool import generate_pdf_report
+from tools.intelligence_tool import calculate_health_scores, get_competitor_comparison, generate_executive_memo
 from tools.schemas import VerifiedOfficer, ResolvedEntity, parse_officer_string, reconcile_officers
 from typing import Dict, Any, Optional, Callable, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -54,15 +58,20 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         """
         start_time = time.time()
         clean_target = target_input.strip()
+        progress_state = {"pct": 0}
 
-        def emit(agent: str, role: str, status: str, message: str):
+        def emit(agent: str, role: str, status: str, message: str, progress: Optional[int] = None, progress_cap: Optional[int] = None):
             elapsed = round(time.time() - start_time, 1)
+            if progress is not None:
+                progress_state["pct"] = max(progress_state["pct"], min(100, int(progress)))
             event = {
                 "time": elapsed,
                 "agent": agent,
                 "role": role,
                 "status": status,
-                "message": message
+                "message": message,
+                "progress": progress_state["pct"],
+                "progress_cap": progress_cap if progress_cap is not None else min(99, progress_state["pct"] + 4)
             }
             if progress_callback:
                 try:
@@ -70,11 +79,11 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
                 except Exception:
                     pass
 
-        emit("Research Supervisor", "Parent Director", "started", f"Initiating deep investigation project for '{clean_target}'...")
+        emit("Research Supervisor", "Parent Director", "started", f"Initiating deep investigation project for '{clean_target}'...", progress=5, progress_cap=9)
         print(f"\n[Parent Agent: {self.name}] Initiating research project for '{clean_target}'...")
 
         # Step 0: Pre-Flight Entity Disambiguation (prevents 'Jazz' -> JAZZ Pharma/NBA, 'Zong' -> 1781 ship, 'Samsung' -> Chaebol)
-        emit("Entity Resolver Agent", "Pre-Flight Disambiguation", "resolving", f"Disambiguating target entity, ownership tier, and search anchors for '{clean_target}'...")
+        emit("Entity Resolver Agent", "Pre-Flight Disambiguation", "resolving", f"Disambiguating target entity, ownership tier, and search anchors for '{clean_target}'...", progress=10, progress_cap=19)
         pre_resolved = self.entity_resolver.resolve(clean_target, region_hint=region_hint, industry_hint=industry_hint)
 
         # Step 1: Route Financial Feed by Pre-Flight Entity Classification (PUBLIC | SUBSIDIARY | PRIVATE)
@@ -130,11 +139,16 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
             ticker = metrics.get("symbol", resolved.ticker or "PRIVATE / UNLISTED")
 
         resolved_dict = resolved.model_dump()
-        emit("Entity Resolver Agent", "Pre-Flight Disambiguation", "completed", f"Resolved '{clean_target}' -> {resolved.canonical_name} [{entity_type}] | Wiki: {resolved.wikipedia_title}")
+        emit("Entity Resolver Agent", "Pre-Flight Disambiguation", "completed", f"Resolved '{clean_target}' -> {resolved.canonical_name} [{entity_type}] | Wiki: {resolved.wikipedia_title}", progress=20, progress_cap=25)
 
-        # Fetch Corporate Biography strictly anchored to ResolvedEntity (exact wikipedia_title + negative keyword guards)
+        # Fetch Corporate Biography strictly anchored to ResolvedEntity (exact wikipedia_title + negative keyword guards + live business_summary fallback)
+        emit("Corporate Biographer Agent", "Corporate Biographer", "fetching_bio", f"Fetching anchored corporate profile and executive roster for {resolved.canonical_name}...", progress=26, progress_cap=31)
         bio_target = resolved.canonical_name if entity_type == "SUBSIDIARY" else (company_name if (is_public and company_name and len(company_name) > len(clean_target)) else clean_target)
-        tool_bio = get_company_biography(bio_target, resolved_entity=resolved_dict)
+        tool_bio = get_company_biography(
+            bio_target,
+            resolved_entity=resolved_dict,
+            business_summary=metrics.get("business_summary", "")
+        )
 
         pre_profile = tool_bio.get("entity_profile", {})
         pre_breaking_gov = pre_profile.get("breaking_governance", [])
@@ -197,21 +211,21 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
 
         if entity_type == "PUBLIC":
             print(f"[Parent Agent] Classified as PUBLIC CORPORATION -> Ticker: {ticker} | Price: {metrics.get('current_price')} | Cap: {metrics.get('market_cap')}")
-            emit("Research Supervisor", "Parent Director", "classified", f"Verified PUBLIC CORPORATION -> Ticker: {ticker} | Price: {metrics.get('current_price')} | Cap: {metrics.get('market_cap')}")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified PUBLIC CORPORATION -> Ticker: {ticker} | Price: {metrics.get('current_price')} | Cap: {metrics.get('market_cap')}", progress=32, progress_cap=35)
         elif entity_type == "SUBSIDIARY":
             print(f"[Parent Agent] Classified as WHOLLY-OWNED SUBSIDIARY -> {company_name} | Parent: {resolved.parent_company}")
-            emit("Research Supervisor", "Parent Director", "classified", f"Verified WHOLLY-OWNED SUBSIDIARY -> Parent: {resolved.parent_company} | HQ: {resolved.headquarters}")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified WHOLLY-OWNED SUBSIDIARY -> Parent: {resolved.parent_company} | HQ: {resolved.headquarters}", progress=32, progress_cap=35)
         else:
             print(f"[Parent Agent] Classified as PRIVATE ENTERPRISE -> Status: Unlisted (No public stock ticker)")
-            emit("Research Supervisor", "Parent Director", "classified", f"Verified PRIVATELY HELD ENTERPRISE -> Status: Unlisted (No public stock ticker)")
+            emit("Research Supervisor", "Parent Director", "classified", f"Verified PRIVATELY HELD ENTERPRISE -> Status: Unlisted (No public stock ticker)", progress=32, progress_cap=35)
         
         # Step 2: Parallel Subagent Execution with Locked Shared State
         print(f"---> [Concurrent Subagent Execution] Calling Financial Analyst, News Scout, and Corporate Biographer in parallel with Locked Shared State...")
-        emit("Research Supervisor", "Parent Director", "dispatching", "Launching 3 specialized subagents in parallel with Locked Single Source of Truth...")
+        emit("Research Supervisor", "Parent Director", "dispatching", "Launching 3 specialized subagents in parallel with Locked Single Source of Truth...", progress=36, progress_cap=49)
 
-        emit("Financial Analyst Agent", "Financial Analyst", "running", "Evaluating canonical valuation matrix, price multiples, and margin dynamics...")
-        emit("News Scout Agent", "News Scout", "running", "Scouring Google News RSS feeds for real-time market catalysts and sentiment...")
-        emit("Corporate Biographer Agent", "Corporate Biographer", "running", "Querying corporate records and historical filings with 2026 temporal awareness...")
+        emit("Financial Analyst Agent", "Financial Analyst", "running", "Evaluating canonical valuation matrix, price multiples, and margin dynamics...", progress=38, progress_cap=49)
+        emit("News Scout Agent", "News Scout", "running", "Scouring Google News RSS feeds for real-time market catalysts and sentiment...", progress=38, progress_cap=49)
+        emit("Corporate Biographer Agent", "Corporate Biographer", "running", "Querying corporate records and historical filings with 2026 temporal awareness...", progress=38, progress_cap=49)
 
         with ThreadPoolExecutor(max_workers=3) as executor:
             f_fin = executor.submit(self.financial_agent.analyze, clean_target, shared_state)
@@ -224,9 +238,20 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
                 f_bio: ("Corporate Biographer Agent", "Corporate Biographer")
             }
 
+            completed_subagents = 0
+            subagent_milestones = [(50, 61), (62, 73), (74, 77)]
             for future in as_completed(futures_map):
                 agent_name, role_name = futures_map[future]
-                emit(agent_name, role_name, "completed", f"{role_name} completed analysis and returned validated intelligence.")
+                pct, cap = subagent_milestones[min(completed_subagents, len(subagent_milestones) - 1)]
+                completed_subagents += 1
+                emit(
+                    agent_name,
+                    role_name,
+                    "completed",
+                    f"{role_name} completed analysis ({completed_subagents}/3 subagents done).",
+                    progress=pct,
+                    progress_cap=cap
+                )
 
             fin_data = f_fin.result()
             news_data = f_news.result()
@@ -288,7 +313,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
 
         print(f"\n[Parent Agent: {self.name}] Synthesizing multi-agent intelligence streams...")
         cfg = config.get_config()
-        emit("Research Supervisor", "Parent Director", "synthesizing", f"Synthesizing comprehensive executive briefing & strategic outlook via {cfg['PROVIDER'].upper()} LLM...")
+        emit("Research Supervisor", "Parent Director", "synthesizing", f"Synthesizing comprehensive executive briefing & strategic outlook via {cfg['PROVIDER'].upper()} LLM...", progress=78, progress_cap=87)
         
         scale_desc = metrics.get('revenue_scale_descriptor', 'Commercial Scale')
         peg_context = metrics.get('peg_rationale', '')
@@ -516,15 +541,20 @@ STRATEGIC_OUTLOOK:
             "shared_state": shared_state
         }
 
+        # Step 3b: Attach deterministic intelligence assets (Health Scorecard, Peer Benchmark, Bull vs. Bear Memo)
+        final_dossier["health_scorecard"] = calculate_health_scores(final_dossier)
+        final_dossier["competitor_comparison"] = get_competitor_comparison(final_dossier)
+        final_dossier["executive_memo"] = generate_executive_memo(final_dossier)
+
         # Step 4: Run QA Critic Node to audit cross-agent consistency & typography
-        emit("QA Critic Agent", "Quality Assurance & Fact-Checking", "verifying", "Auditing dossier for Single Source of Truth consistency, tabular verification, and typography sanitization...")
+        emit("QA Critic Agent", "Quality Assurance & Fact-Checking", "verifying", "Auditing dossier for Single Source of Truth consistency, tabular verification, and typography sanitization...", progress=88, progress_cap=93)
         final_dossier = self.qa_critic.review_and_sanitize(final_dossier, shared_state)
 
         # Generate In-Memory Report (No disk files created)
-        emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade in-memory PDF dossier...")
+        emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade in-memory PDF dossier...", progress=94, progress_cap=98)
         pdf_bytes = generate_pdf_report(final_dossier)
         
-        emit("Research Supervisor", "Parent Director", "complete", f"Investigation completed successfully in {elapsed_time}s! All dossiers verified.")
+        emit("Research Supervisor", "Parent Director", "complete", f"Investigation completed successfully in {elapsed_time}s! All dossiers verified.", progress=100, progress_cap=100)
         print(f"\n[Parent Agent: {self.name}] Investigation completed in {elapsed_time}s! (In-memory, 0 disk files created)")
         
         return {

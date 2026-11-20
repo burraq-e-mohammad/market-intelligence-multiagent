@@ -1,13 +1,31 @@
+import sys
+import os
+
+# Auto-mount local project root & virtual environment site-packages
+_here = os.path.dirname(os.path.abspath(__file__))
+_root = os.path.abspath(os.path.join(_here, ".."))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+_venv_site_candidates = [
+    os.path.join(_root, "venv", "Lib", "site-packages"),
+    os.path.join(_root, ".venv", "Lib", "site-packages"),
+    os.path.join(_root, "venv", "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages"),
+]
+for _sp in _venv_site_candidates:
+    if os.path.isdir(_sp) and _sp not in sys.path:
+        sys.path.insert(0, _sp)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
-import os
 import json
 import base64
 import queue
 import threading
+import time
 from agents.supervisor import ResearchSupervisor
 import config
 
@@ -30,6 +48,15 @@ supervisor = ResearchSupervisor()
 
 class ResearchRequest(BaseModel):
     target: str
+
+class QARequest(BaseModel):
+    target: Optional[str] = None
+    question: str
+    dossier: Dict[str, Any]
+
+class QAResponse(BaseModel):
+    question: str
+    answer: str
 
 class ResearchResponse(BaseModel):
     status: str
@@ -131,14 +158,25 @@ def conduct_research_stream(request: ResearchRequest):
 
         worker_thread = threading.Thread(target=run_worker)
         worker_thread.start()
+        stream_start = time.time()
 
         while True:
-            item = event_queue.get()
+            try:
+                item = event_queue.get(timeout=1.2)
+            except queue.Empty:
+                if not worker_thread.is_alive():
+                    break
+                yield json.dumps({"type": "heartbeat", "elapsed": round(time.time() - stream_start, 1)}) + "\n"
+                continue
             if item is None:
                 break
             yield json.dumps(item, default=str) + "\n"
 
-    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 @app.get("/api/pdf")
 def download_pdf(target: str):
@@ -155,6 +193,34 @@ def download_pdf(target: str):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={clean}_dossier.pdf"}
+    )
+
+@app.post("/api/research/qa", response_model=QAResponse)
+def answer_dossier_qa(request: QARequest):
+    """
+    Answers user follow-up questions directly from the synthesized intelligence dossier.
+    Instant latency (~1s), does not rerun the multi-agent pipeline.
+    """
+    q = request.question.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+    
+    from tools.intelligence_tool import answer_question_from_dossier
+    answer = answer_question_from_dossier(request.dossier, q)
+    return {"question": q, "answer": answer}
+
+@app.post("/api/export/csv")
+def export_csv_model(request: Dict[str, Any]):
+    """
+    Generates a structured financial data model CSV that opens natively in Microsoft Excel.
+    """
+    from tools.export_tool import generate_excel_or_csv_export
+    csv_bytes, filename, mime_type = generate_excel_or_csv_export(request)
+    from fastapi.responses import Response
+    return Response(
+        content=csv_bytes,
+        media_type=mime_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
 if __name__ == "__main__":

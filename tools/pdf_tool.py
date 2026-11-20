@@ -4,6 +4,7 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from tools.intelligence_tool import calculate_health_scores, get_competitor_comparison, generate_executive_memo
 
 def sanitize_text(text: str) -> str:
     """
@@ -15,8 +16,13 @@ def sanitize_text(text: str) -> str:
         return ""
     
     # 1. Clean raw LaTeX / Escaped Currency / Math artifacts while preserving valid currency ($154.71, $3.78T, $115.8 billion)
-    # Unescape ANY number of ASCII/Unicode backslashes (with optional space) before $, %, &, _, * FIRST
+    # Normalize Unicode fullwidth/small dollar signs and unescape backslashes FIRST
+    text = text.replace("\uFF04", "$").replace("\uFE69", "$")
     text = re.sub(r'[\\\uFF3C\u2216]+\s*\$', '$', text)
+    text = re.sub(
+        r'\$+\s*(?:\\(?:text|mathrm|mathbf|textbf|mathit)\{)?\s*(P\s*/\s*E|PEG|EPS|EV\s*/\s*EBITDA|P\s*/\s*S|P\s*/\s*B|ROE|ROA|FCF|ARR|YoY|QoQ|EBITDA)\s*\}?\s*\$+',
+        r'\1', text, flags=re.IGNORECASE
+    )
     text = re.sub(r'[\\\uFF3C\u2216]+([%&_\*#])', r'\1', text)
     text = re.sub(r'\\(?=[0-9\$])', '', text)
     # Unwrap LaTeX wrapper commands BEFORE stripping $...$ so $\text{P/E}$ -> $P/E$ -> P/E
@@ -59,6 +65,11 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r'\$(?![0-9])', '', text)
     # Fix accidental double periods (e.g. "November 2026..") while preserving ellipses ("...")
     text = re.sub(r'(?<!\.)\.\.(?!\.)', '.', text)
+    # Deduplicate accidental consecutive repeated words (e.g. "formal formal", "the the")
+    text = re.sub(
+        r'\b(formal|the|a|an|in|on|at|to|of|for|with|by|as|is|are|was|were|be|no|not|and|or|from|that|this|its|their|current|verified|public|private|annual|quarterly)\s+\1\b',
+        r'\1', text, flags=re.IGNORECASE
+    )
     # Clean duplicated PEG phrasing if present
     text = re.sub(r'\bWith\s+a\s+(PEG\s+ratio\s+of\s+[0-9\.]+)\s*,\s*\1\b', r'A \1', text, flags=re.IGNORECASE)
     text = re.sub(r'\bcanonical\b', 'verified', text, flags=re.IGNORECASE)
@@ -302,20 +313,123 @@ def generate_pdf_report(
         pdf.cell(63, 7, sanitize_text(row[3]), border=1)
         pdf.ln(7)
         
-    pdf.ln(3)
+    pdf.ln(2)
+
+    # 1b. Enterprise Health & Risk Scorecard (0-100)
+    scores = report_data.get("health_scorecard") or calculate_health_scores(report_data)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(30, 41, 59)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(190, 5.5, sanitize_text(f"ENTERPRISE HEALTH & RISK SCORECARD: {scores['overall_score']}/100 ({scores['letter_grade']})"), border=1, fill=True, align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    score_headers = [
+        ("Overall Score", f"{scores['overall_score']}/100"),
+        ("Financial Health", f"{scores['financial_strength']}/100"),
+        ("Growth Score", f"{scores['growth_momentum']}/100"),
+        ("Valuation Attractiveness", f"{scores['valuation_score']}/100"),
+        ("Safety & Risk Index", f"{scores['safety_risk_index']}/100"),
+    ]
+    pdf.set_font("Helvetica", "", 7.5)
+    pdf.set_fill_color(248, 250, 252)
+    pdf.set_text_color(30, 41, 59)
+    for title, val in score_headers:
+        pdf.cell(38, 5, sanitize_text(f"{title}: {val}"), border=1, fill=True, align="C")
+    pdf.ln(6)
     
     # Executive Summary Section
     pdf.section_title("2. Executive Summary & Strategic Synthesis")
+
+    # 2b. Executive Verdict Memo (Bull vs. Bear Synthesis)
+    memo = report_data.get("executive_memo") or generate_executive_memo(report_data)
+    if memo:
+        pdf.set_fill_color(241, 245, 249)
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(30, 58, 138)
+        pdf.cell(190, 5.5, sanitize_text(f"STRATEGIC STANCE: {memo.get('stance', 'CONSTRUCTIVE')} -- {memo.get('headline', '')}"), border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        pdf.set_font("Helvetica", "I", 7.8)
+        pdf.set_text_color(51, 65, 85)
+        pdf.multi_cell(190, 4, sanitize_text(f"Core Takeaway: {memo.get('takeaway', '')}"), border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.set_text_color(22, 101, 52) # Dark green
+        for pro in memo.get("pros", []):
+            pdf.multi_cell(190, 3.8, sanitize_text(f"  [+] Upside Driver: {pro}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            
+        pdf.set_text_color(153, 27, 27) # Dark red
+        for con in memo.get("cons", []):
+            pdf.multi_cell(190, 3.8, sanitize_text(f"  [-] Risk Vector: {con}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2.5)
+
     pdf.body_paragraph(exec_summary)
     
     # Background & Corporate History
     pdf.section_title("3. Corporate Background, Operations & Strategic Moat")
     pdf.body_paragraph(corp_bg)
     
-    # Financial Analysis Narrative
+    # Financial Analysis Narrative + Native Vector Charts (Public Equities)
     if fin_analysis:
         pdf.section_title("4. In-Depth Financial & Valuation Analysis")
         pdf.body_paragraph(fin_analysis)
+
+        # 4b. Competitive Peer Benchmark Matrix
+        competitors = report_data.get("competitor_comparison") or get_competitor_comparison(report_data)
+        if competitors:
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(30, 41, 59)
+            pdf.cell(190, 5.5, "Competitive Peer Benchmarking Matrix", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.set_fill_color(226, 232, 240)
+            pdf.set_text_color(15, 23, 42)
+            pdf.cell(32, 5, "Company", border=1, fill=True)
+            pdf.cell(14, 5, "Ticker", border=1, fill=True)
+            pdf.cell(24, 5, "Valuation", border=1, fill=True)
+            pdf.cell(15, 5, "P/E", border=1, fill=True)
+            pdf.cell(16, 5, "Growth", border=1, fill=True)
+            pdf.cell(16, 5, "Margin", border=1, fill=True)
+            pdf.cell(73, 5, "Strategic Differentiator / Moat", border=1, fill=True)
+            pdf.ln(5)
+            
+            # Target Row
+            pdf.set_font("Helvetica", "B", 6.8)
+            pdf.set_fill_color(239, 246, 255)
+            pdf.set_text_color(30, 64, 175)
+            pdf.cell(32, 5, sanitize_text(f"{company[:18]} (Target)"), border=1, fill=True)
+            pdf.cell(14, 5, sanitize_text(ticker[:6]), border=1, fill=True)
+            pdf.cell(24, 5, sanitize_text(str(metrics.get("market_cap", "Baseline"))[:12]), border=1, fill=True)
+            pdf.cell(15, 5, sanitize_text(str(metrics.get("trailing_pe", metrics.get("pe_ratio", "N/A")))[:8]), border=1, fill=True)
+            pdf.cell(16, 5, sanitize_text(str(metrics.get("revenue_growth_yoy", "Baseline"))[:8]), border=1, fill=True)
+            pdf.cell(16, 5, sanitize_text(str(metrics.get("profit_margins", "Reported"))[:8]), border=1, fill=True)
+            pdf.cell(73, 5, "Target Enterprise Moat & Ecosystem", border=1, fill=True)
+            pdf.ln(5)
+
+            # Peer Rows
+            pdf.set_font("Helvetica", "", 6.5)
+            pdf.set_text_color(51, 65, 85)
+            for c in competitors:
+                pdf.cell(32, 5, sanitize_text(c.get("name", "")[:20]), border=1)
+                pdf.cell(14, 5, sanitize_text(c.get("ticker", "")[:6]), border=1)
+                pdf.cell(24, 5, sanitize_text(c.get("market_cap", "")[:12]), border=1)
+                pdf.cell(15, 5, sanitize_text(c.get("pe_ratio", "")[:8]), border=1)
+                pdf.cell(16, 5, sanitize_text(c.get("revenue_growth", "")[:8]), border=1)
+                pdf.cell(16, 5, sanitize_text(c.get("net_margin", "")[:8]), border=1)
+                raw_edge = c.get("edge", "")
+                if len(raw_edge) > 65:
+                    trimmed = raw_edge[:62].rsplit(' ', 1)[0] + "..."
+                else:
+                    trimmed = raw_edge
+                pdf.cell(73, 5, sanitize_text(trimmed), border=1)
+                pdf.ln(5)
+            pdf.ln(2.5)
+
+        if entity_type == "PUBLIC" and is_public and metrics.get("chart_data"):
+            try:
+                from tools.chart_tool import render_financial_charts_to_pdf
+                render_financial_charts_to_pdf(pdf, metrics.get("chart_data"), company, ticker)
+            except Exception:
+                pass
 
     # Recent News & Catalysts
     pdf.section_title("5. Recent News, Strategic Moves & Market Sentiment")

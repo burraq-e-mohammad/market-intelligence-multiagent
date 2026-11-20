@@ -1,6 +1,7 @@
 from agents.base_agent import BaseAgent
 from tools.finance_tool import get_financial_metrics, generate_deterministic_financial_table
 from typing import Dict, Any, Optional
+import re
 
 class FinancialAnalystAgent(BaseAgent):
     def __init__(self):
@@ -81,12 +82,33 @@ TEMPORAL ANCHOR, DATA-LAG AWARENESS & FORMATTING CONSTRAINTS:
 ### 1. Valuation Architecture & Multiple Dynamics
 Analyze trailing vs. forward multiples ({metrics.get('trailing_pe', 'N/A')} trailing vs. {fwd_pe_val} forward) and the PEG ratio of {peg_val} anchored to multi-year EPS expansion.
 ### 2. Trading Corridor & Price Discovery Dynamics
-Evaluate the stock's 52-week channel ({metrics.get('52_week_low')} to {metrics.get('52_week_high')}) against the regular quote of {metrics.get('current_price')} (and extended-hours quote if active).
+Evaluate the stock's verified 52-week channel ({metrics.get('52_week_low')} to {metrics.get('52_week_high')}) against the regular quote of {metrics.get('current_price')} (and extended-hours quote if active). Crucially, analyze where the current quote sits relative to this range: identify whether it is trading near the 52-week low (e.g. following a healthy pullback/consolidation from historical highs) or near the 52-week high, and NEVER claim the stock is at highs if it is near the lower boundary of the range.
 ### 3. Operating Profitability, Margins & Consensus Outlook
 Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_margins')}), feed roll-forward context, and Wall Street rating targets."""
 
             llm_analysis = self.generate_response(prompt)
             if "Report]" in llm_analysis:
+                # Calculate dynamic position in 52-week range to prevent hallucinated corridor claims
+                low_str = str(metrics.get('52_week_low', ''))
+                high_str = str(metrics.get('52_week_high', ''))
+                curr_str = str(metrics.get('current_price', ''))
+                
+                corridor_desc = f"oscillates within its verified 52-week trading corridor of {metrics.get('52_week_low')} - {metrics.get('52_week_high')}"
+                try:
+                    low_val = float(re.sub(r'[^0-9\.]', '', low_str.split()[0]))
+                    high_val = float(re.sub(r'[^0-9\.]', '', high_str.split()[0]))
+                    curr_val = float(re.sub(r'[^0-9\.]', '', curr_str.split()[0]))
+                    if high_val > low_val:
+                        pos = (curr_val - low_val) / (high_val - low_val)
+                        if pos <= 0.25:
+                            corridor_desc = f"trades in the lower quartile of its 52-week corridor ({metrics.get('52_week_low')} - {metrics.get('52_week_high')}), consolidating near its 52-week low following a pullback from historical highs"
+                        elif pos >= 0.75:
+                            corridor_desc = f"trades in the upper quartile of its 52-week corridor ({metrics.get('52_week_low')} - {metrics.get('52_week_high')}), pressing toward historical resistance and highs"
+                        else:
+                            corridor_desc = f"trades in the mid-range of its 52-week corridor ({metrics.get('52_week_low')} - {metrics.get('52_week_high')})"
+                except Exception:
+                    pass
+
                 llm_analysis = (
                     f"### 1. Valuation Architecture & Multiple Dynamics\n"
                     f"{metrics.get('company_name')} ({metrics.get('symbol')}) trades on the {metrics.get('exchange', 'Stock Exchange')} "
@@ -94,7 +116,7 @@ Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_mar
                     f"The equity commands a trailing price-to-earnings (P/E) multiple of {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))} and a forward P/E of {metrics.get('forward_pe', 'N/A')}. "
                     f"A {peg_rationale}\n\n"
                     f"### 2. Trading Corridor & Price Discovery Dynamics\n"
-                    f"Currently priced at {metrics.get('current_price')}, the equity oscillates within its verified 52-week corridor of {metrics.get('52_week_low')} - {metrics.get('52_week_high')}. "
+                    f"Currently priced at {metrics.get('current_price')}, the equity {corridor_desc}. "
                     f"This trading channel underscores liquidity depth and market re-rating amidst macroeconomic interest rate shifts.\n\n"
                     f"### 3. Operating Profitability, Margins & Consensus Outlook\n"
                     f"Core fundamentals indicate operating margins of {metrics.get('operating_margins', metrics.get('profit_margins', 'N/A'))} and net profit margins of {metrics.get('profit_margins')} "
@@ -173,7 +195,7 @@ STRICT PRIVATE-ENTITY GUARDRAILS:
 1. ZERO PUBLIC-EQUITY BOILERPLATE: This is a PRIVATE company with NO public stock price, NO Forward P/E, NO Trailing P/E, and NO PEG ratio. Under NO circumstances include paragraphs discussing Forward P/E or PEG ratio formulas!
 2. EXACT NUMERIC SCALE DISCIPLINE: Never call $1B 'multi-billion' (only $2B-$9.9B is multi-billion; $10B-$99.9B is double-digit billion; ONLY $100B+ is triple-digit billion). Always lead with the MOST RECENT 2025-2026 valuation and ARR figures rather than outdated 2023 figures.
 3. STRICT CHRONOLOGICAL ORDER: Present corporate restructuring, governance proposals, and IPO timelines in strict chronological order (e.g., earlier proposals -> completed restructuring -> current 2026 structure -> future IPO roadmap; never introduce an earlier year's proposal after describing a completed later restructuring).
-4. CONCRETE PRIVATE FIGURES: Explicitly incorporate any verified post-money valuations, funding round sizes, anchor investors, ARR figures, and IPO/restructuring details documented above.
+4. CONCRETE PRIVATE FIGURES & INVESTOR FIDELITY: Explicitly incorporate any verified post-money valuations, funding round sizes, full anchor investor names (NEVER truncate multi-word investor names like 'Greenoaks Capital' into bare 'Capital'), ARR figures, and Form S-1 / IPO filing details documented above.
 5. FORMATTING: Write currency cleanly ($852 billion, NEVER \\$852 billion). Never use LaTeX $...$ around words or ratios. Never use meta words like 'canonical', 'provided', or 'prompt'.
 
 Provide an in-depth 3-section evaluation:

@@ -44,7 +44,9 @@ class BaseAgent:
                 from openai import OpenAI
                 client = OpenAI(
                     base_url="https://api.groq.com/openai/v1",
-                    api_key=groq_key
+                    api_key=groq_key,
+                    timeout=5.0,
+                    max_retries=1
                 )
                 response = client.chat.completions.create(
                     model=cfg["GROQ_MODEL"],
