@@ -39,7 +39,11 @@ class BaseAgent:
                 from google import genai
                 client = genai.Client(api_key=gemini_key)
                 
-                gemini_candidates = list(dict.fromkeys([cfg["GEMINI_MODEL"], "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"]))
+                gemini_candidates = list(dict.fromkeys([
+                    cfg["GEMINI_MODEL"],
+                    "gemini-2.5-flash",
+                    "gemini-2.5-flash-lite"
+                ]))
                 for g_model in gemini_candidates:
                     try:
                         response = client.models.generate_content(
@@ -81,7 +85,31 @@ class BaseAgent:
             except Exception:
                 pass
 
-        # 3. Intelligent Heuristic Fallback
+        # 3. Optional local Ollama failover
+        if provider == "ollama":
+            try:
+                from openai import OpenAI
+                client = OpenAI(
+                    base_url=cfg["OLLAMA_BASE_URL"],
+                    api_key="ollama",
+                    timeout=12.0,
+                    max_retries=1
+                )
+                response = client.chat.completions.create(
+                    model=cfg["OLLAMA_MODEL"],
+                    messages=[
+                        {"role": "system", "content": full_prompt},
+                        {"role": "user", "content": "Return the requested structured answer now."}
+                    ],
+                    temperature=0.2
+                )
+                content = response.choices[0].message.content.strip()
+                if content:
+                    return content
+            except Exception:
+                pass
+
+        # 4. Intelligent Heuristic Fallback
         return self._heuristic_fallback(full_prompt)
 
     def _heuristic_fallback(self, prompt: str) -> str:
