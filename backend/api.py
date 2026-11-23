@@ -18,7 +18,7 @@ for _sp in _venv_site_candidates:
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import json
@@ -27,8 +27,6 @@ import threading
 import time
 from agents.supervisor import ResearchSupervisor
 import config
-from fastapi.responses import Response
-
 _pdf_cache: Dict[str, bytes] = {}
 
 def _normalize_pdf_cache_key(value: str) -> str:
@@ -182,7 +180,7 @@ def conduct_research_stream(request: ResearchRequest):
     )
 
 @app.get("/api/pdf")
-def download_pdf(target: str):
+def download_pdf(target: str, cache_only: bool = True):
     """
     Serve generated PDF dossier directly in-memory without saving any files to disk.
     """
@@ -197,13 +195,16 @@ def download_pdf(target: str):
             media_type="application/pdf",
             headers={"Content-Disposition": f"attachment; filename={clean}_dossier.pdf"}
         )
+    if cache_only:
+        raise HTTPException(status_code=404, detail="The PDF is still being prepared or is not cached.")
+
     results = supervisor.run_investigation(clean)
     pdf_bytes = results.get("pdf_bytes")
     if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) < 100:
         raise HTTPException(status_code=500, detail="PDF generation failed.")
     _pdf_cache[cache_key] = bytes(pdf_bytes)
     return Response(
-        content=pdf_bytes,
+        content=bytes(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={clean}_dossier.pdf"}
     )

@@ -393,6 +393,7 @@ if execute_btn or preset:
         )
 
     render_progress(tracker["pct"], tracker["agent"], tracker["message"], 0.0, state="running")
+    st.caption("Please wait while the dossier and PDF are prepared. The page will update automatically.")
 
     dossier = None
     pdf_bytes = None
@@ -461,6 +462,7 @@ if execute_btn or preset:
                                 dossier = results.get("dossier")
                                 pdf_bytes = None
                                 execution_time = results.get("execution_time")
+                                break
                             elif item_type == "error":
                                 error_message = item.get("error")
                 elif response.status_code == 404:
