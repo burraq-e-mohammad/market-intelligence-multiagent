@@ -31,6 +31,9 @@ from fastapi.responses import Response
 
 _pdf_cache: Dict[str, bytes] = {}
 
+def _normalize_pdf_cache_key(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
 app = FastAPI(
     title="Autonomous Market Intelligence Multi-Agent API",
     description="Backend API powering the Parent-Subagents Market Research System",
@@ -149,7 +152,7 @@ def conduct_research_stream(request: ResearchRequest):
                     "execution_time": results.get("execution_time")
                 }
                 if isinstance(pdf_raw, (bytes, bytearray)):
-                    _pdf_cache[target.lower()] = bytes(pdf_raw)
+                    _pdf_cache[_normalize_pdf_cache_key(target)] = bytes(pdf_raw)
                 event_queue.put({"type": "done", "results": safe_results})
             except Exception as exc:
                 event_queue.put({"type": "error", "error": str(exc)})
@@ -186,7 +189,8 @@ def download_pdf(target: str):
     clean = target.strip()
     if not clean:
         raise HTTPException(status_code=400, detail="Target company name or ticker required.")
-    cached = _pdf_cache.get(clean.lower())
+    cache_key = _normalize_pdf_cache_key(clean)
+    cached = _pdf_cache.get(cache_key)
     if cached:
         return Response(
             content=cached,
@@ -195,7 +199,9 @@ def download_pdf(target: str):
         )
     results = supervisor.run_investigation(clean)
     pdf_bytes = results.get("pdf_bytes")
-    from fastapi.responses import Response
+    if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) < 100:
+        raise HTTPException(status_code=500, detail="PDF generation failed.")
+    _pdf_cache[cache_key] = bytes(pdf_bytes)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
