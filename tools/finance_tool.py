@@ -6,30 +6,122 @@ import calendar
 import re
 from tools.schemas import FiscalCalendarContext, VerifiedOfficer, classify_role_category
 
-def normalize_name(name: str) -> str:
-    """Normalize company name by stripping legal forms and punctuation for clean comparison."""
+def normalize_name_clean(name: str) -> str:
+    """Normalize company name by stripping noise prefixes, corporate legal forms, and punctuation."""
+    if not name:
+        return ""
     n = name.lower()
-    n = re.sub(r'\b(ltd|limited|inc|incorporated|corp|corporation|pvt|co|company|group|pbc|llc|plc|holdings|sa|ag|gmbh)\b', '', n)
+    # Replace punctuation (hyphens, dots, ampersands, slashes) with spaces
+    n = re.sub(r'[-–—/&,\.]+', ' ', n)
+    # Remove common corporate legal forms and noise articles
+    n = re.sub(r'\b(the|ltd|limited|inc|incorporated|corp|corporation|pvt|co|company|group|pbc|llc|plc|holdings|sa|ag|gmbh|oyj|nv|bv|spa|holding|enterprises?)\b', '', n)
+    # Remove non-alphanumeric
     n = re.sub(r'[^a-z0-9\s]', '', n)
     return ' '.join(n.split())
 
-def is_valid_name_match(query: str, candidate_name: str) -> bool:
+def score_name_match(query: str, candidate_name: str) -> int:
     """
-    Ensure the candidate actually represents the queried company.
-    Prevents false substring matches (e.g. 'Systems Limited' matching 'Apollo Micro Systems Ltd').
+    Computes a match score (0-100) between user query and candidate company name.
+    Eliminates false substring collisions while ensuring true enterprise matches.
     """
-    q_norm = normalize_name(query)
-    c_norm = normalize_name(candidate_name)
+    q_norm = normalize_name_clean(query)
+    c_norm = normalize_name_clean(candidate_name)
     if not q_norm or not c_norm:
-        return False
-    # Exact normalized match (e.g. 'systems' == 'systems')
+        return 0
     if q_norm == c_norm:
-        return True
-    # Candidate starts with query (e.g. 'apple' -> 'apple consumer')
+        return 100
     if c_norm.startswith(q_norm + ' '):
-        return True
-    # If candidate has distinct leading words not present in query (like 'Apollo Micro'), reject!
-    return False
+        return 85
+    if c_norm.endswith(' ' + q_norm):
+        return 75
+    q_words = set(q_norm.split())
+    c_words = set(c_norm.split())
+    if q_words.issubset(c_words):
+        return 70
+    if c_words.issubset(q_words) and len(c_words) >= 1:
+        return 65
+    return 0
+
+def is_valid_name_match(query: str, candidate_name: str) -> bool:
+    """Backwards-compatible wrapper around score_name_match."""
+    return score_name_match(query, candidate_name) >= 50
+
+def normalize_name(name: str) -> str:
+    """Backwards-compatible alias for normalize_name_clean."""
+    return normalize_name_clean(name)
+
+def fetch_live_chart_direct(symbol: str) -> Optional[Dict[str, Any]]:
+    """
+    Direct zero-auth Yahoo Finance Chart API endpoint.
+    Retrieves authentic live market price, 52-week range, and 250 daily historical closes.
+    Never throttles on crumb or cookie requirements.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1y"
+    try:
+        r = requests.get(url, headers=headers, timeout=6)
+        if r.status_code == 200:
+            res = r.json().get("chart", {}).get("result", [])
+            if res:
+                d = res[0]
+                meta = d.get("meta", {})
+                quotes = d.get("indicators", {}).get("quote", [{}])[0]
+                timestamps = d.get("timestamp", [])
+                closes = quotes.get("close", [])
+                points = []
+                for ts, cl in zip(timestamps, closes):
+                    if cl is not None:
+                        points.append(round(float(cl), 2))
+                return {
+                    "price": meta.get("regularMarketPrice"),
+                    "high52": meta.get("fiftyTwoWeekHigh"),
+                    "low52": meta.get("fiftyTwoWeekLow"),
+                    "currency": meta.get("currency", "USD"),
+                    "exchange": meta.get("exchangeName", "Stock Exchange"),
+                    "closes": points
+                }
+    except Exception:
+        pass
+    return None
+
+def resolve_ticker_live(query_or_symbol: str) -> tuple[Optional[str], Optional[str], bool]:
+    """
+    Universally resolves any company query or ticker into its live equity exchange symbol.
+    Uses yfinance Search + score matching across all global public equities.
+    """
+    q = query_or_symbol.strip()
+    
+    # 1. Uppercase ticker passed directly (e.g. AAPL, MSFT, DIS, BA, NVDA, SYS.KA, 005930.KS)
+    if q.isupper() and 1 <= len(q) <= 9 and not any(c in q for c in [' ']):
+        return q, q, True
+
+    # 2. Dynamic search across all global stock exchanges
+    try:
+        s = yf.Search(q)
+        quotes = getattr(s, "quotes", [])
+        best_ticker = None
+        best_name = None
+        best_score = 0
+        for item in quotes:
+            qtype = item.get("quoteType")
+            sym = item.get("symbol")
+            if qtype != "EQUITY" or not sym:
+                continue
+            sn = item.get("shortname") or ""
+            ln = item.get("longname") or ""
+            sc = max(score_name_match(q, sn), score_name_match(q, ln))
+            if sc > best_score:
+                best_score = sc
+                best_ticker = sym
+                best_name = ln or sn
+        if best_ticker and best_score >= 50:
+            return best_ticker, best_name, True
+    except Exception:
+        pass
+
+    return None, q, False
 
 def format_number(val: Optional[float], prefix: str = "$", currency: str = "USD") -> str:
     """Format large numbers into B/M/K representations."""
@@ -78,27 +170,6 @@ def get_peg_rationale(peg: Optional[float], fwd_pe: Optional[float]) -> str:
     elif peg is not None:
         return f"PEG ratio of {peg:.2f} reflects multiple valuation against Wall Street consensus multi-year EPS growth."
     return "PEG ratio reflects Forward P/E relative to consensus long-term earnings growth."
-
-KNOWN_FISCAL_YEAR_ENDS: Dict[str, int] = {
-    "NVDA": 1,   # Late January (e.g. FY2027 runs Feb 2026 - Jan 2027)
-    "WMT": 1,    # January 31
-    "CRM": 1,    # January 31
-    "TGT": 1,    # Late January
-    "DELL": 1,   # Late January
-    "MSFT": 6,   # June 30
-    "ORCL": 5,   # May 31
-    "AAPL": 9,   # Late September
-    "DIS": 9,    # Late September
-    "COST": 8,   # Late August
-    "ACN": 8,    # August 31
-    "ADBE": 11,  # Late November
-    "AVGO": 10,  # Late October
-    "TSLA": 12,  # December 31
-    "AMZN": 12,  # December 31
-    "GOOGL": 12, # December 31
-    "META": 12,  # December 31
-    "SYS.KA": 12 # December 31
-}
 
 def compute_fiscal_calendar_context(fy_end_month: int = 12, ref_date: Optional[datetime] = None) -> Dict[str, Any]:
     """
@@ -199,171 +270,6 @@ def extract_sec_officers(info: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
     return verified
 
-OFFLINE_DEMO_PROFILES = {
-    "NVDA": {
-        "symbol": "NVDA",
-        "company_name": "NVIDIA Corporation",
-        "entity_type": "Publicly Traded Corporation",
-        "exchange": "NASDAQ",
-        "sector": "Technology",
-        "industry": "Semiconductors & AI Hardware",
-        "current_price": "154.71 USD",
-        "market_cap": "$3.78T",
-        "pe_ratio": "19.59",
-        "trailing_pe": "19.59",
-        "forward_pe": "9.77",
-        "peg_ratio": "0.20",
-        "price_to_sales": "12.48",
-        "enterprise_to_ebitda": "15.30",
-        "52_week_high": "243.37 USD",
-        "52_week_low": "148.80 USD",
-        "total_revenue": "$302.97B",
-        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
-        "peg_rationale": "PEG ratio of 0.20 reflects Forward P/E (9.77x) relative to consensus long-term EPS compound growth of ~48.9% (not revenue growth).",
-        "gross_margins": "75.12%",
-        "operating_margins": "62.05%",
-        "profit_margins": "55.60%",
-        "revenue_growth_yoy": "+105.90%",
-        "analyst_target_price": "255.00 USD",
-        "analyst_rating": "BUY"
-    },
-    "AAPL": {
-        "symbol": "AAPL",
-        "company_name": "Apple Inc.",
-        "entity_type": "Publicly Traded Corporation",
-        "exchange": "NASDAQ",
-        "sector": "Technology",
-        "industry": "Consumer Electronics",
-        "current_price": "228.40 USD",
-        "market_cap": "$3.45T",
-        "pe_ratio": "33.20",
-        "trailing_pe": "33.20",
-        "forward_pe": "28.50",
-        "peg_ratio": "2.40",
-        "price_to_sales": "8.70",
-        "enterprise_to_ebitda": "24.10",
-        "52_week_high": "237.23 USD",
-        "52_week_low": "164.08 USD",
-        "total_revenue": "$391.04B",
-        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
-        "peg_rationale": "PEG ratio of 2.40 reflects Forward P/E (28.50x) relative to consensus long-term EPS growth.",
-        "gross_margins": "46.21%",
-        "operating_margins": "31.25%",
-        "profit_margins": "24.00%",
-        "revenue_growth_yoy": "+6.10%",
-        "analyst_target_price": "245.00 USD",
-        "analyst_rating": "BUY"
-    },
-    "MSFT": {
-        "symbol": "MSFT",
-        "company_name": "Microsoft Corporation",
-        "entity_type": "Publicly Traded Corporation",
-        "exchange": "NASDAQ",
-        "sector": "Technology",
-        "industry": "Software & Cloud Services",
-        "current_price": "425.10 USD",
-        "market_cap": "$3.15T",
-        "pe_ratio": "34.80",
-        "trailing_pe": "34.80",
-        "forward_pe": "30.10",
-        "peg_ratio": "2.10",
-        "price_to_sales": "12.80",
-        "enterprise_to_ebitda": "22.50",
-        "52_week_high": "468.35 USD",
-        "52_week_low": "366.50 USD",
-        "total_revenue": "$245.12B",
-        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
-        "peg_rationale": "PEG ratio of 2.10 reflects Forward P/E (30.10x) relative to consensus long-term EPS growth.",
-        "gross_margins": "69.80%",
-        "operating_margins": "44.60%",
-        "profit_margins": "36.20%",
-        "revenue_growth_yoy": "+15.20%",
-        "analyst_target_price": "495.00 USD",
-        "analyst_rating": "BUY"
-    },
-    "TSLA": {
-        "symbol": "TSLA",
-        "company_name": "Tesla, Inc.",
-        "entity_type": "Publicly Traded Corporation",
-        "exchange": "NASDAQ",
-        "sector": "Consumer Cyclical",
-        "industry": "Auto Manufacturers & Energy",
-        "current_price": "340.20 USD",
-        "market_cap": "$1.09T",
-        "pe_ratio": "88.50",
-        "trailing_pe": "88.50",
-        "forward_pe": "62.40",
-        "peg_ratio": "3.80",
-        "price_to_sales": "10.90",
-        "enterprise_to_ebitda": "48.20",
-        "52_week_high": "360.00 USD",
-        "52_week_low": "138.80 USD",
-        "total_revenue": "$97.15B",
-        "revenue_scale_descriptor": "tens-of-billions dollar scale",
-        "peg_rationale": "PEG ratio of 3.80 reflects high-multiple growth pricing against projected auto and energy EPS growth.",
-        "gross_margins": "18.20%",
-        "operating_margins": "8.20%",
-        "profit_margins": "7.10%",
-        "revenue_growth_yoy": "+7.80%",
-        "analyst_target_price": "310.00 USD",
-        "analyst_rating": "HOLD"
-    },
-    "AMZN": {
-        "symbol": "AMZN",
-        "company_name": "Amazon.com, Inc.",
-        "entity_type": "Publicly Traded Corporation",
-        "exchange": "NASDAQ",
-        "sector": "Consumer Cyclical",
-        "industry": "Internet Retail & Cloud",
-        "current_price": "205.50 USD",
-        "market_cap": "$2.15T",
-        "pe_ratio": "42.10",
-        "trailing_pe": "42.10",
-        "forward_pe": "32.80",
-        "peg_ratio": "1.35",
-        "price_to_sales": "3.45",
-        "enterprise_to_ebitda": "18.90",
-        "52_week_high": "215.90 USD",
-        "52_week_low": "144.05 USD",
-        "total_revenue": "$620.13B",
-        "revenue_scale_descriptor": "triple-digit billion-dollar scale",
-        "peg_rationale": "PEG ratio of 1.35 reflects Forward P/E (32.80x) against AWS and advertising EPS compound growth.",
-        "gross_margins": "48.50%",
-        "operating_margins": "9.80%",
-        "profit_margins": "7.80%",
-        "revenue_growth_yoy": "+11.00%",
-        "analyst_target_price": "235.00 USD",
-        "analyst_rating": "BUY"
-    },
-    "SYS.KA": {
-        "symbol": "SYS.KA",
-        "company_name": "Systems Limited",
-        "entity_type": "Publicly Traded Corporation",
-        "exchange": "Pakistan Stock Exchange (PSX)",
-        "sector": "Technology & Services",
-        "industry": "IT Consulting & Software Delivery",
-        "current_price": "432.50 PKR",
-        "market_cap": "PKR 125.80B",
-        "pe_ratio": "14.20",
-        "trailing_pe": "14.20",
-        "forward_pe": "11.50",
-        "peg_ratio": "0.85",
-        "price_to_sales": "2.40",
-        "enterprise_to_ebitda": "9.80",
-        "52_week_high": "485.00 PKR",
-        "52_week_low": "310.00 PKR",
-        "total_revenue": "PKR 54.30B",
-        "revenue_scale_descriptor": "tens-of-billions PKR scale",
-        "peg_rationale": "PEG ratio of 0.85 reflects attractive multiple relative to >25% historical earnings growth.",
-        "gross_margins": "31.50%",
-        "operating_margins": "21.80%",
-        "profit_margins": "18.20%",
-        "revenue_growth_yoy": "+28.40%",
-        "analyst_target_price": "520.00 PKR",
-        "analyst_rating": "BUY"
-    }
-}
-
 def get_yf_session() -> requests.Session:
     """
     Returns a preconfigured requests.Session with modern browser headers.
@@ -381,131 +287,72 @@ def get_yf_session() -> requests.Session:
 
 def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
     """
-    Intelligently checks whether the company is a PUBLICLY traded equity or a PRIVATE entity.
-    Uses strict entity matching to prevent false positives (e.g. Systems Limited vs Apollo Micro Systems).
+    Universally resolves any company query or ticker into its live equity exchange symbol.
+    Fetches 100% real-time market data across fast_info, zero-auth direct chart feeds, and SEC filings.
+    Completely eliminates hardcoded offline mock profiles.
     """
     query = query_or_symbol.strip()
-    
-    # Curated authoritative mappings for major public companies (global & regional)
-    known_tickers = {
-        "systems limited": "SYS.KA",
-        "systems": "SYS.KA",
-        "netsol": "NTWK",
-        "netsol technologies": "NTWK",
-        "ntwk": "NTWK",
-        "apple": "AAPL", "aapl": "AAPL",
-        "nvidia": "NVDA", "nvda": "NVDA",
-        "microsoft": "MSFT", "msft": "MSFT",
-        "tesla": "TSLA", "tsla": "TSLA",
-        "google": "GOOGL", "alphabet": "GOOGL", "googl": "GOOGL",
-        "amazon": "AMZN", "amzn": "AMZN",
-        "meta": "META",
-        "netflix": "NFLX",
-        "amd": "AMD",
-        "intel": "INTC",
-        "tcs": "TCS.NS",
-        "infosys": "INFY"
-    }
-    
-    resolved_ticker = None
-    is_public = False
-    
-    lowered_query = query.lower()
-    if lowered_query in known_tickers:
-        resolved_ticker = known_tickers[lowered_query]
-        is_public = True
-    elif query.isupper() and 1 <= len(query) <= 6 and not any(c in query for c in [' ', '.']):
-        resolved_ticker = query
-        is_public = True
-    else:
-        # Search yfinance directory with strict name verification
-        try:
-            search_results = yf.Search(query)
-            quotes = getattr(search_results, "quotes", [])
-            for q in quotes:
-                if q.get("quoteType") == "EQUITY" and q.get("symbol"):
-                    short_name = q.get("shortname") or ""
-                    long_name = q.get("longname") or ""
-                    
-                    # Strictly verify that candidate name actually matches query
-                    if is_valid_name_match(query, short_name) or is_valid_name_match(query, long_name):
-                        resolved_ticker = q["symbol"]
-                        is_public = True
-                        break
-        except Exception:
-            pass
+    resolved_ticker, official_name, is_public = resolve_ticker_live(query)
 
-    # If identified as a verified public equity
     if is_public and resolved_ticker:
         try:
             session = get_yf_session()
             ticker = yf.Ticker(resolved_ticker, session=session)
-            info = ticker.info or {}
-            
-            # Fetch price
-            current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-            market_cap = info.get("marketCap")
-            currency = info.get("currency") or "USD"
-            fifty_two_week_high = info.get("fiftyTwoWeekHigh")
-            fifty_two_week_low = info.get("fiftyTwoWeekLow")
 
-            # Fall back to fast_info if crumb timeout caused info to be sparse
-            if current_price is None or market_cap is None:
-                fast_info = getattr(ticker, "fast_info", None)
-                if fast_info:
-                    try:
-                        current_price = current_price or getattr(fast_info, "last_price", None)
-                        market_cap = market_cap or getattr(fast_info, "market_cap", None)
-                        currency = getattr(fast_info, "currency", None) or currency
-                        fifty_two_week_high = fifty_two_week_high or getattr(fast_info, "year_high", None)
-                        fifty_two_week_low = fifty_two_week_low or getattr(fast_info, "year_low", None)
-                    except Exception:
-                        pass
+            # Tier 1: fast_info & direct zero-auth chart API (ultra-fast, zero crumb throttling)
+            fast_info = getattr(ticker, "fast_info", None)
+            chart_feed = fetch_live_chart_direct(resolved_ticker) or {}
 
-            # If both price and market cap are completely missing due to live crumb/network block,
-            # trigger clean fallback to verified profile rather than presenting a broken empty sheet
-            if current_price is None and market_cap is None and resolved_ticker in OFFLINE_DEMO_PROFILES:
-                raise ValueError(f"Incomplete live market feed for {resolved_ticker}; activating verified fallback.")
+            current_price = getattr(fast_info, "last_price", None) or chart_feed.get("price")
+            market_cap = getattr(fast_info, "market_cap", None)
+            currency = getattr(fast_info, "currency", None) or chart_feed.get("currency") or "USD"
+            fifty_two_week_high = getattr(fast_info, "year_high", None) or chart_feed.get("high52")
+            fifty_two_week_low = getattr(fast_info, "year_low", None) or chart_feed.get("low52")
+            exchange = chart_feed.get("exchange") or getattr(fast_info, "exchange", "Stock Exchange")
+
+            # Tier 2: ticker.info for deep valuation multiples & margins
+            info = {}
+            try:
+                info = ticker.info or {}
+            except Exception:
+                info = {}
+
+            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or current_price
+            market_cap = info.get("marketCap") or market_cap
+            currency = info.get("currency") or currency
+            fifty_two_week_high = info.get("fiftyTwoWeekHigh") or fifty_two_week_high
+            fifty_two_week_low = info.get("fiftyTwoWeekLow") or fifty_two_week_low
+            exchange = info.get("exchange") or exchange
+
             trailing_pe = info.get("trailingPE")
             forward_pe = info.get("forwardPE")
             pe_ratio = trailing_pe or forward_pe
             peg_ratio = info.get("pegRatio")
             price_to_sales = info.get("priceToSalesTrailing12Months")
             enterprise_to_ebitda = info.get("enterpriseToEbitda")
-            fifty_two_week_high = info.get("fiftyTwoWeekHigh") or fifty_two_week_high
-            fifty_two_week_low = info.get("fiftyTwoWeekLow") or fifty_two_week_low
             total_revenue = info.get("totalRevenue")
             gross_margins = info.get("grossMargins")
             operating_margins = info.get("operatingMargins")
             profit_margins = info.get("profitMargins")
             revenue_growth = info.get("revenueGrowth")
             target_mean_price = info.get("targetMeanPrice")
-            if not target_mean_price and resolved_ticker == "NVDA":
-                target_mean_price = 255.0
             recommendation = info.get("recommendationKey", "N/A")
 
-            # Capture Extended-Hours (Post-Market / Pre-Market) trading quote deterministically
-            # NEVER trust Yahoo's raw postMarketChangePercent scaling (0.8471% vs 0.008471); compute exact % from prices!
+            # Extended-Hours context (computed deterministically)
             post_price = info.get("postMarketPrice")
             pre_price = info.get("preMarketPrice")
             extended_hours_context = ""
             if isinstance(post_price, (int, float)) and post_price > 0:
                 if isinstance(current_price, (int, float)) and current_price > 0:
                     delta_pct = ((post_price - current_price) / current_price) * 100.0
-                    pct_str = f" ({delta_pct:+.2f}%)"
-                else:
-                    pct_str = ""
-                extended_hours_context = f"After-Hours: {post_price:,.2f} {currency}{pct_str}"
+                    extended_hours_context = f"After-Hours: {post_price:,.2f} {currency} ({delta_pct:+.2f}%)"
             elif isinstance(pre_price, (int, float)) and pre_price > 0:
                 if isinstance(current_price, (int, float)) and current_price > 0:
                     delta_pct = ((pre_price - current_price) / current_price) * 100.0
-                    pct_str = f" ({delta_pct:+.2f}%)"
-                else:
-                    pct_str = ""
-                extended_hours_context = f"Pre-Market: {pre_price:,.2f} {currency}{pct_str}"
+                    extended_hours_context = f"Pre-Market: {pre_price:,.2f} {currency} ({delta_pct:+.2f}%)"
 
-            # Universal Fiscal Year End detection (from SEC/Yahoo lastFiscalYearEnd timestamp)
-            fy_end_month = KNOWN_FISCAL_YEAR_ENDS.get(resolved_ticker, 12)
+            # Universal Fiscal Year End detection directly from SEC / market timestamps
+            fy_end_month = 12
             last_fy_ts = info.get("lastFiscalYearEnd") or info.get("nextFiscalYearEnd")
             if isinstance(last_fy_ts, (int, float)) and last_fy_ts > 0:
                 try:
@@ -515,7 +362,7 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             fiscal_calendar = compute_fiscal_calendar_context(fy_end_month)
             sec_officers = extract_sec_officers(info)
 
-            # Detect TTM market-feed cutoff date (only flag 24-72h data lag when feed quarter is >95 days old)
+            # Detect TTM market-feed cutoff date
             mrq_ts = info.get("mostRecentQuarter")
             ttm_cutoff_label = ""
             if isinstance(mrq_ts, (int, float)) and mrq_ts > 0:
@@ -533,85 +380,72 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             op_pct = f"{operating_margins * 100:.2f}%" if operating_margins is not None else "N/A"
             margin_pct = f"{profit_margins * 100:.2f}%" if profit_margins is not None else "N/A"
             growth_pct = f"{revenue_growth * 100:+.2f}%" if revenue_growth is not None else "N/A"
-            official_name = info.get("longName") or info.get("shortName") or query
+            canonical_name = official_name or info.get("longName") or info.get("shortName") or query
 
-            # Verify official name isn't a completely different entity
-            if is_valid_name_match(query, official_name) or resolved_ticker in known_tickers.values():
+            # Extract live chart datasets
+            chart_data = {}
+            try:
+                from tools.chart_tool import extract_chart_data
+                chart_data = extract_chart_data(ticker, info, currency=currency)
+            except Exception:
                 chart_data = {}
-                try:
-                    from tools.chart_tool import extract_chart_data
-                    chart_data = extract_chart_data(ticker, info, currency=currency)
-                except Exception:
-                    chart_data = {}
 
-                return {
-                    "status": "success",
-                    "is_public": True,
-                    "data": {
-                        "symbol": resolved_ticker,
-                        "company_name": official_name,
-                        "entity_type": "Publicly Traded Corporation",
-                        "exchange": info.get("exchange", "Stock Exchange"),
-                        "sector": info.get("sector") or "Commercial & Industrial",
-                        "industry": info.get("industry") or "Commercial Services",
-                        "business_summary": (info.get("longBusinessSummary") or "").strip(),
-                        "headquarters_city": (info.get("city") or "").strip(),
-                        "headquarters_country": (info.get("country") or "").strip(),
-                        "current_price": f"{current_price:,.2f} {currency}" if current_price else "N/A",
-                        "extended_hours_context": extended_hours_context,
-                        "ttm_cutoff_label": ttm_cutoff_label,
-                        "market_cap": format_number(market_cap, currency=currency),
-                        "pe_ratio": f"{pe_ratio:,.2f}" if pe_ratio else "N/A",
-                        "trailing_pe": f"{trailing_pe:,.2f}" if trailing_pe else "N/A",
-                        "forward_pe": f"{forward_pe:,.2f}" if forward_pe else "N/A",
-                        "peg_ratio": f"{peg_ratio:.2f}" if peg_ratio else "N/A",
-                        "price_to_sales": f"{price_to_sales:.2f}" if price_to_sales else "N/A",
-                        "enterprise_to_ebitda": f"{enterprise_to_ebitda:.2f}" if enterprise_to_ebitda else "N/A",
-                        "52_week_high": f"{fifty_two_week_high:,.2f} {currency}" if fifty_two_week_high else "N/A",
-                        "52_week_low": f"{fifty_two_week_low:,.2f} {currency}" if fifty_two_week_low else "N/A",
-                        "total_revenue": format_number(total_revenue, currency=currency),
-                        "revenue_scale_descriptor": get_revenue_scale_descriptor(total_revenue),
-                        "peg_rationale": get_peg_rationale(peg_ratio, forward_pe),
-                        "gross_margins": gross_pct,
-                        "operating_margins": op_pct,
-                        "profit_margins": margin_pct,
-                        "revenue_growth_yoy": growth_pct,
-                        "analyst_target_price": f"{target_mean_price:,.2f} {currency}" if target_mean_price else "N/A",
-                        "analyst_rating": recommendation.upper() if recommendation else "N/A",
-                        "fiscal_calendar": fiscal_calendar,
-                        "sec_officers": sec_officers,
-                        "chart_data": chart_data
+            # Supplement chart data with direct zero-auth closes if needed
+            if not chart_data.get("price_history") and chart_feed.get("closes"):
+                closes = chart_feed["closes"]
+                if len(closes) >= 5:
+                    points = [{"date": f"D-{len(closes)-i}", "close": c, "sma50": None} for i, c in enumerate(closes)]
+                    chart_data["price_history"] = points
+                    chart_data["price_summary"] = {
+                        "latest_close": closes[-1],
+                        "high_1y": max(closes),
+                        "low_1y": min(closes),
+                        "return_1y_pct": round(((closes[-1] - closes[0]) / closes[0] * 100.0), 2) if closes[0] > 0 else 0.0
                     }
-                }
-        except Exception:
-            pass
 
-        # If live API failed (e.g. 403 / network timeout), fallback to verified public profile
-        if resolved_ticker in OFFLINE_DEMO_PROFILES:
-            profile_copy = dict(OFFLINE_DEMO_PROFILES[resolved_ticker])
-            fy_end_month = KNOWN_FISCAL_YEAR_ENDS.get(resolved_ticker, 12)
-            profile_copy["fiscal_calendar"] = compute_fiscal_calendar_context(fy_end_month)
-            profile_copy.setdefault("sec_officers", [])
-            profile_copy.setdefault("extended_hours_context", "")
-            profile_copy.setdefault("ttm_cutoff_label", "Market-data feed TTM snapshot (may lag latest 8-K by 24-72h)")
-            offline_margins = []
-            for lbl, key in [("Gross Margin", "gross_margins"), ("Operating Margin", "operating_margins"), ("Net Profit Margin", "profit_margins")]:
-                raw_m = str(profile_copy.get(key, "")).replace("%", "").strip()
-                try:
-                    offline_margins.append({"label": lbl, "value": float(raw_m)})
-                except Exception:
-                    pass
-            cur_code = str(profile_copy.get("current_price", "USD")).split()[-1] if " " in str(profile_copy.get("current_price", "")) else "USD"
-            from tools.chart_tool import generate_deterministic_chart_data
-            profile_copy["chart_data"] = generate_deterministic_chart_data(resolved_ticker, profile_copy, currency=cur_code)
             return {
                 "status": "success",
                 "is_public": True,
-                "data": profile_copy
+                "data": {
+                    "symbol": resolved_ticker,
+                    "company_name": canonical_name,
+                    "entity_type": "Publicly Traded Corporation",
+                    "exchange": exchange,
+                    "sector": info.get("sector") or "Commercial & Industrial",
+                    "industry": info.get("industry") or "Commercial Services",
+                    "business_summary": (info.get("longBusinessSummary") or "").strip(),
+                    "headquarters_city": (info.get("city") or "").strip(),
+                    "headquarters_country": (info.get("country") or "").strip(),
+                    "current_price": f"{current_price:,.2f} {currency}" if current_price else "N/A",
+                    "extended_hours_context": extended_hours_context,
+                    "ttm_cutoff_label": ttm_cutoff_label,
+                    "market_cap": format_number(market_cap, currency=currency),
+                    "pe_ratio": f"{pe_ratio:,.2f}" if pe_ratio else "N/A",
+                    "trailing_pe": f"{trailing_pe:,.2f}" if trailing_pe else "N/A",
+                    "forward_pe": f"{forward_pe:,.2f}" if forward_pe else "N/A",
+                    "peg_ratio": f"{peg_ratio:.2f}" if peg_ratio else "N/A",
+                    "price_to_sales": f"{price_to_sales:.2f}" if price_to_sales else "N/A",
+                    "enterprise_to_ebitda": f"{enterprise_to_ebitda:.2f}" if enterprise_to_ebitda else "N/A",
+                    "52_week_high": f"{fifty_two_week_high:,.2f} {currency}" if fifty_two_week_high else "N/A",
+                    "52_week_low": f"{fifty_two_week_low:,.2f} {currency}" if fifty_two_week_low else "N/A",
+                    "total_revenue": format_number(total_revenue, currency=currency),
+                    "revenue_scale_descriptor": get_revenue_scale_descriptor(total_revenue),
+                    "peg_rationale": get_peg_rationale(peg_ratio, forward_pe),
+                    "gross_margins": gross_pct,
+                    "operating_margins": op_pct,
+                    "profit_margins": margin_pct,
+                    "revenue_growth_yoy": growth_pct,
+                    "analyst_target_price": f"{target_mean_price:,.2f} {currency}" if target_mean_price else "N/A",
+                    "analyst_rating": recommendation.upper() if recommendation else "N/A",
+                    "fiscal_calendar": fiscal_calendar,
+                    "sec_officers": sec_officers,
+                    "chart_data": chart_data
+                }
             }
+        except Exception:
+            pass
 
     # If unlisted / private or no exact public stock found
-    # Retain the user's EXACT query as the company name! Never hijack it with another company!
     return {
         "status": "success",
         "is_public": False,
@@ -714,7 +548,7 @@ def generate_deterministic_financial_table(
 
 if __name__ == "__main__":
     import json
-    print("--- Test 'Systems Limited' ---")
-    print(json.dumps(get_financial_metrics("Systems Limited"), indent=2))
-    print("\n--- Test 'OpenAI' ---")
-    print(json.dumps(get_financial_metrics("OpenAI"), indent=2))
+    import sys
+    target = sys.argv[1] if len(sys.argv) > 1 else input("Enter a company name or ticker: ").strip()
+    if target:
+        print(json.dumps(get_financial_metrics(target), indent=2))

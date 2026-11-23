@@ -9,74 +9,6 @@ Provides deterministic, institutional-grade analytics for multi-agent dossiers:
 from typing import Dict, Any, List, Optional
 import re
 
-# Curated institutional peer benchmarks for top global enterprises
-PEER_BENCHMARK_DATABASE: Dict[str, List[Dict[str, Any]]] = {
-    "NVDA": [
-        {
-            "name": "AMD",
-            "ticker": "AMD",
-            "market_cap": "$852.4B",
-            "pe_ratio": "46.5x",
-            "revenue_growth": "+24.0%",
-            "net_margin": "18.2%",
-            "edge": "MI300/MI350 Data Center AI GPUs & EPYC x86 Processors"
-        },
-        {
-            "name": "Broadcom",
-            "ticker": "AVGO",
-            "market_cap": "$1.68T",
-            "pe_ratio": "38.2x",
-            "revenue_growth": "+38.5%",
-            "net_margin": "32.0%",
-            "edge": "Custom Hyperscale AI XPUs & Tomahawk Networking"
-        },
-        {
-            "name": "Intel",
-            "ticker": "INTC",
-            "market_cap": "$112.5B",
-            "pe_ratio": "N/A",
-            "revenue_growth": "-4.5%",
-            "net_margin": "-2.1%",
-            "edge": "Legacy Enterprise x86 & Foundry Restructuring"
-        }
-    ],
-    "MSFT": [
-        {"name": "Apple", "ticker": "AAPL", "market_cap": "$3.45T", "pe_ratio": "33.2x", "revenue_growth": "+6.1%", "net_margin": "26.4%", "edge": "Consumer Device Ecosystem & Services Moat"},
-        {"name": "Alphabet", "ticker": "GOOGL", "market_cap": "$2.15T", "pe_ratio": "24.1x", "revenue_growth": "+15.2%", "net_margin": "27.5%", "edge": "Search Monopoly & Google Cloud Challenger"},
-        {"name": "Amazon", "ticker": "AMZN", "market_cap": "$2.10T", "pe_ratio": "43.8x", "revenue_growth": "+11.0%", "net_margin": "7.8%", "edge": "AWS Cloud Infrastructure & Global Retail"}
-    ],
-    "AAPL": [
-        {"name": "Microsoft", "ticker": "MSFT", "market_cap": "$3.15T", "pe_ratio": "34.5x", "revenue_growth": "+15.5%", "net_margin": "36.1%", "edge": "Enterprise Software, Copilot & Azure Cloud"},
-        {"name": "Alphabet", "ticker": "GOOGL", "market_cap": "$2.15T", "pe_ratio": "24.1x", "revenue_growth": "+15.2%", "net_margin": "27.5%", "edge": "Android Mobile Ecosystem & Gemini AI"},
-        {"name": "Samsung Electronics", "ticker": "005930.KS", "market_cap": "$340B", "pe_ratio": "13.5x", "revenue_growth": "+12.8%", "net_margin": "11.2%", "edge": "Global Smartphone Volume & Memory Chips"}
-    ],
-    "TSLA": [
-        {"name": "BYD Company", "ticker": "1211.HK", "market_cap": "$105B", "pe_ratio": "20.4x", "revenue_growth": "+24.0%", "net_margin": "5.2%", "edge": "Affordable High-Volume EV & Battery Integration"},
-        {"name": "General Motors", "ticker": "GM", "market_cap": "$62B", "pe_ratio": "5.8x", "revenue_growth": "+10.5%", "net_margin": "6.1%", "edge": "Traditional Fleet Scale & High-Margin Pickups"},
-        {"name": "Rivian Automotive", "ticker": "RIVN", "market_cap": "$11B", "pe_ratio": "N/A", "revenue_growth": "+19.0%", "net_margin": "-85.0%", "edge": "Pure-Play Electric Trucks & Commercial Vans"}
-    ],
-    "AMZN": [
-        {"name": "Microsoft", "ticker": "MSFT", "market_cap": "$3.15T", "pe_ratio": "34.5x", "revenue_growth": "+15.5%", "net_margin": "36.1%", "edge": "Azure vs. AWS Enterprise Cloud Competition"},
-        {"name": "Walmart", "ticker": "WMT", "market_cap": "$680B", "pe_ratio": "34.2x", "revenue_growth": "+5.4%", "net_margin": "2.4%", "edge": "Omnichannel Physical Store & Grocery Dominance"},
-        {"name": "Alibaba Group", "ticker": "BABA", "market_cap": "$210B", "pe_ratio": "18.5x", "revenue_growth": "+4.0%", "net_margin": "12.0%", "edge": "Asia-Pacific E-Commerce & AliCloud"}
-    ],
-    "BVI.PA": [
-        {"name": "SGS SA", "ticker": "SGSN.SW", "market_cap": "CHF 16.8B ($18.9B)", "pe_ratio": "24.8x", "revenue_growth": "+5.2%", "net_margin": "8.5%", "edge": "Primary Global TIC Rival (Geneva, Switzerland)"},
-        {"name": "Eurofins Scientific", "ticker": "ERF.PA", "market_cap": "EUR 10.5B ($11.4B)", "pe_ratio": "23.1x", "revenue_growth": "+6.8%", "net_margin": "8.0%", "edge": "Bioanalytical, Food & Environmental Testing"},
-        {"name": "Intertek Group", "ticker": "ITRK.L", "market_cap": "GBP 7.9B ($10.1B)", "pe_ratio": "22.4x", "revenue_growth": "+7.1%", "net_margin": "10.2%", "edge": "UK/Global Total Quality Assurance Services"}
-    ],
-    "SYS.KA": [
-        {"name": "Tata Consultancy (TCS)", "ticker": "TCS.NS", "market_cap": "$180B", "pe_ratio": "30.2x", "revenue_growth": "+8.5%", "net_margin": "19.3%", "edge": "Global Tier-1 IT Outsourcing & Enterprise Transformation"},
-        {"name": "Infosys", "ticker": "INFY", "market_cap": "$92B", "pe_ratio": "28.5x", "revenue_growth": "+7.8%", "net_margin": "17.1%", "edge": "Global Cloud & AI Transformation Services"},
-        {"name": "Wipro", "ticker": "WIT", "market_cap": "$32B", "pe_ratio": "22.8x", "revenue_growth": "+3.5%", "net_margin": "12.5%", "edge": "Consulting, Cloud Infrastructure & Digital Engineering"}
-    ],
-    "MTVE": [
-        {"name": "Samsara", "ticker": "IOT", "market_cap": "$24.5B", "pe_ratio": "N/A", "revenue_growth": "+37.0%", "net_margin": "-14.2%", "edge": "Primary NYSE-Listed Connected Operations / Fleet Competitor"},
-        {"name": "Trimble", "ticker": "TRMB", "market_cap": "$17.2B", "pe_ratio": "32.5x", "revenue_growth": "+4.1%", "net_margin": "18.1%", "edge": "Enterprise Positioning, Telematics & Field Software"},
-        {"name": "Geotab", "ticker": "Private", "market_cap": "$2.5B+ (Est.)", "pe_ratio": "Private", "revenue_growth": "+20.0%", "net_margin": "Profitable", "edge": "Large-Scale Connected Fleet Telematics Hardware & Cloud"}
-    ]
-}
-
 def fetch_programmatic_peer_metrics(
     ticker_symbol: str,
     name: str,
@@ -105,7 +37,7 @@ def fetch_programmatic_peer_metrics(
         session = get_yf_session()
         ticker_obj = yf.Ticker(ticker_symbol, session=session)
 
-        # 1. Market Cap
+        # 1. Market Cap via fast_info (ultra-fast ~0.1s latency)
         mc = None
         fast_info = getattr(ticker_obj, "fast_info", None)
         if fast_info:
@@ -114,35 +46,40 @@ def fetch_programmatic_peer_metrics(
             except Exception:
                 pass
 
-        info = {}
-        try:
-            info = ticker_obj.info or {}
-        except Exception:
-            pass
-
-        if mc is None and info:
-            mc = info.get("marketCap")
-
         if mc and isinstance(mc, (int, float)) and mc > 0:
-            curr = info.get("currency") or (getattr(fast_info, "currency", "USD") if fast_info else "USD") or "USD"
+            curr = getattr(fast_info, "currency", "USD") or "USD"
             result["market_cap"] = format_number(mc, currency=curr)
 
-        # 2. P/E Multiple
-        trailing_pe = info.get("trailingPE")
-        forward_pe = info.get("forwardPE")
-        pe = trailing_pe or forward_pe
-        if pe and isinstance(pe, (int, float)) and pe > 0:
-            result["pe_ratio"] = f"{pe:.1f}x"
+        # Only pull full info if key metrics are missing from institutional fallback
+        if result.get("pe_ratio") in (None, "N/A") or result.get("revenue_growth") in (None, "N/A"):
+            info = {}
+            try:
+                info = ticker_obj.info or {}
+            except Exception:
+                pass
 
-        # 3. Revenue Growth (YoY)
-        rev_growth = info.get("revenueGrowth")
-        if rev_growth is not None and isinstance(rev_growth, (int, float)):
-            result["revenue_growth"] = f"{rev_growth * 100:+.1f}%"
+            if mc is None and info:
+                mc = info.get("marketCap")
+                if mc and isinstance(mc, (int, float)) and mc > 0:
+                    curr = info.get("currency") or "USD"
+                    result["market_cap"] = format_number(mc, currency=curr)
 
-        # 4. Profit Margin
-        profit_margin = info.get("profitMargins") or info.get("operatingMargins")
-        if profit_margin is not None and isinstance(profit_margin, (int, float)):
-            result["net_margin"] = f"{profit_margin * 100:.1f}%"
+            # 2. P/E Multiple
+            trailing_pe = info.get("trailingPE")
+            forward_pe = info.get("forwardPE")
+            pe = trailing_pe or forward_pe
+            if pe and isinstance(pe, (int, float)) and pe > 0:
+                result["pe_ratio"] = f"{pe:.1f}x"
+
+            # 3. Revenue Growth (YoY)
+            rev_growth = info.get("revenueGrowth")
+            if rev_growth is not None and isinstance(rev_growth, (int, float)):
+                result["revenue_growth"] = f"{rev_growth * 100:+.1f}%"
+
+            # 4. Profit Margin
+            profit_margin = info.get("profitMargins") or info.get("operatingMargins")
+            if profit_margin is not None and isinstance(profit_margin, (int, float)):
+                result["net_margin"] = f"{profit_margin * 100:.1f}%"
 
     except Exception:
         # Fall back cleanly without breaking the pipeline
@@ -151,86 +88,74 @@ def fetch_programmatic_peer_metrics(
     return result
 
 def get_competitor_comparison(dossier: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Returns 2-3 key competitors formatted for side-by-side benchmarking.
-    Works dynamically for public, private, and subsidiary entities.
-    Enriches public peer metrics programmatically via yfinance.
-    """
-    ticker = (dossier.get("ticker") or "").upper().strip()
-    company_name = dossier.get("company_name", "")
-    metrics = dossier.get("metrics", {})
-    resolved_entity = dossier.get("resolved_entity") or {}
-    entity_type = dossier.get("entity_type") or ("PUBLIC" if dossier.get("is_public") else "PRIVATE")
-    sector = (metrics.get("sector") or resolved_entity.get("sector") or "").lower()
+    """Discover and live-fetch peers dynamically, without a hardcoded peer registry."""
+    company_name = (dossier.get("company_name") or "").strip()
+    ticker = (dossier.get("ticker") or "").strip()
+    if not company_name:
+        return []
 
-    raw_peers: List[Dict[str, Any]] = []
+    resolved = dossier.get("resolved_entity") or {}
+    sector = resolved.get("sector") or dossier.get("metrics", {}).get("sector") or "its industry"
+    industry = dossier.get("metrics", {}).get("industry") or sector
 
-    # 1. Direct ticker or recognized private alias match
-    if ticker in PEER_BENCHMARK_DATABASE:
-        raw_peers = PEER_BENCHMARK_DATABASE[ticker]
-    else:
-        # Check for known private entities by name
-        name_lower = company_name.lower()
-        if "motive" in name_lower or "keeptruckin" in name_lower:
-            raw_peers = PEER_BENCHMARK_DATABASE["MTVE"]
-        elif "bureau veritas" in name_lower:
-            raw_peers = PEER_BENCHMARK_DATABASE["BVI.PA"]
-        elif "systems" in name_lower:
-            raw_peers = PEER_BENCHMARK_DATABASE["SYS.KA"]
-        elif entity_type == "SUBSIDIARY" or "telecom" in sector:
-            raw_peers = [
-                {"name": "Telenor Pakistan", "ticker": "Consolidated", "market_cap": "45M Subscribers", "pe_ratio": "Parent: TEL.OL", "revenue_growth": "+8.5%", "net_margin": "EBITDA ~45%", "edge": "Nationwide Cellular & Mobile Broadband Network"},
-                {"name": "PTCL / Ufone", "ticker": "PTC.KA", "market_cap": "25M Subscribers", "pe_ratio": "Parent: e& (Etisalat)", "revenue_growth": "+12.0%", "net_margin": "EBITDA ~35%", "edge": "Fixed-Line Infrastructure & Wireless 4G"},
-                {"name": "Zong 4G", "ticker": "Subsidiary", "market_cap": "48M Subscribers", "pe_ratio": "Parent: China Mobile", "revenue_growth": "+10.1%", "net_margin": "EBITDA ~40%", "edge": "China Mobile 4G Data Network & Spectrum"}
-            ]
-        elif "openai" in name_lower or "anthropic" in name_lower:
-            raw_peers = [
-                {"name": "Anthropic", "ticker": "Private", "market_cap": "$18B - $40B", "pe_ratio": "Private", "revenue_growth": "+200%+", "net_margin": "High R&D Burn", "edge": "Claude 3.5 Sonnet & Enterprise Safety Alignment"},
-                {"name": "Google DeepMind", "ticker": "GOOGL", "market_cap": "$2.15T (Parent)", "pe_ratio": "24.1x", "revenue_growth": "+15.2%", "net_margin": "27.5%", "edge": "Gemini Multimodal Models & Custom TPU Compute"},
-                {"name": "Meta AI", "ticker": "META", "market_cap": "$1.55T", "pe_ratio": "28.5x", "revenue_growth": "+19.0%", "net_margin": "35.5%", "edge": "Open-Source Llama Foundation Models & Massive Scale"}
-            ]
-        elif "semi" in sector or "chip" in sector or "hardware" in sector:
-            raw_peers = [
-                {"name": "AMD", "ticker": "AMD", "market_cap": "$852.4B", "pe_ratio": "46.5x", "revenue_growth": "+24.0%", "net_margin": "18.2%", "edge": "MI300/MI350 Data Center AI GPUs & EPYC x86 Processors"},
-                {"name": "Qualcomm", "ticker": "QCOM", "market_cap": "$185B", "pe_ratio": "19.5x", "revenue_growth": "+18.0%", "net_margin": "29.8%", "edge": "Mobile Handset & Edge Snapdragon Processors"},
-                {"name": "TSMC", "ticker": "TSM", "market_cap": "$980B", "pe_ratio": "26.4x", "revenue_growth": "+36.0%", "net_margin": "42.5%", "edge": "Global Leading-Edge Semiconductor Foundry"}
-            ]
-        elif "software" in sector or "tech" in sector or "cloud" in sector:
-            raw_peers = [
-                {"name": "Microsoft", "ticker": "MSFT", "market_cap": "$3.15T", "pe_ratio": "34.5x", "revenue_growth": "+15.5%", "net_margin": "36.1%", "edge": "Enterprise Cloud & Productivity Ecosystem"},
-                {"name": "Salesforce", "ticker": "CRM", "market_cap": "$310B", "pe_ratio": "48.2x", "revenue_growth": "+8.4%", "net_margin": "19.1%", "edge": "Enterprise CRM & Agentforce AI Platform"},
-                {"name": "Oracle", "ticker": "ORCL", "market_cap": "$480B", "pe_ratio": "42.0x", "revenue_growth": "+7.5%", "net_margin": "20.8%", "edge": "OCI Cloud Infrastructure & Database Moat"}
-            ]
-        elif "auto" in sector or "transport" in sector:
-            raw_peers = [
-                {"name": "Toyota Motor", "ticker": "TM", "market_cap": "$280B", "pe_ratio": "7.2x", "revenue_growth": "+6.8%", "net_margin": "10.4%", "edge": "Global Volume & Hybrid Vehicle Moat"},
-                {"name": "Tesla", "ticker": "TSLA", "market_cap": "$1.05T", "pe_ratio": "118.0x", "revenue_growth": "+8.0%", "net_margin": "14.4%", "edge": "Full Self-Driving (FSD) & Global Supercharger Network"},
-                {"name": "BYD Company", "ticker": "1211.HK", "market_cap": "$105B", "pe_ratio": "20.4x", "revenue_growth": "+24.0%", "net_margin": "5.2%", "edge": "Vertical Battery Manufacturing & Value EV Pricing"}
-            ]
-        else:
-            raw_peers = [
-                {"name": "Microsoft", "ticker": "MSFT", "market_cap": "$3.15T", "pe_ratio": "34.5x", "revenue_growth": "+15.5%", "net_margin": "36.1%", "edge": "Enterprise Software & Cloud Scalability"},
-                {"name": "Apple", "ticker": "AAPL", "market_cap": "$3.45T", "pe_ratio": "33.2x", "revenue_growth": "+6.1%", "net_margin": "26.4%", "edge": "Global Premium Consumer Brand Moat"},
-                {"name": "Alphabet", "ticker": "GOOGL", "market_cap": "$2.15T", "pe_ratio": "24.1x", "revenue_growth": "+15.2%", "net_margin": "27.5%", "edge": "Proprietary AI Models & Search Network"}
-            ]
+    try:
+        from agents.base_agent import BaseAgent
+        agent = BaseAgent(
+            name="Peer Discovery",
+            role="Competitive Peer Researcher",
+            system_prompt="Identify publicly traded direct competitors. Return only valid JSON."
+        )
+        prompt = f"""Identify up to 3 direct public-company competitors for {company_name}
+({ticker or 'unlisted'}) in sector {sector}, industry {industry}.
+Return ONLY a JSON array of objects:
+{{"name":"company name","ticker":"exchange symbol","edge":"brief factual competitive distinction"}}.
+Exclude {company_name}. Do not invent names or symbols."""
+        import json
+        match = re.search(r'\[.*\]', agent.generate_response(prompt), re.DOTALL)
+        candidates = json.loads(match.group(0)) if match else []
+    except Exception:
+        candidates = []
 
-    # Programmatically enrich any public peers using yfinance
-    enriched_peers: List[Dict[str, Any]] = []
-    for peer in raw_peers:
-        p_ticker = peer.get("ticker", "")
-        # Only query tickers that look like valid exchange symbols and are not private / consolidated
-        if p_ticker and not any(p_ticker.startswith(pfx) for pfx in ["Private", "Consolidated", "Subsidiary", "Parent"]):
-            enriched = fetch_programmatic_peer_metrics(
-                ticker_symbol=p_ticker,
-                name=peer.get("name", p_ticker),
-                edge=peer.get("edge", ""),
-                fallback_data=peer
-            )
-            enriched_peers.append(enriched)
-        else:
-            enriched_peers.append(peer)
+    peers = []
+    for candidate in candidates[:3]:
+        name = str(candidate.get("name") or "").strip()
+        peer_ticker = str(candidate.get("ticker") or "").strip()
+        if not name or not peer_ticker:
+            continue
+        try:
+            import yfinance as yf
+            peer = yf.Ticker(peer_ticker)
+            info = peer.info or {}
+            fast = getattr(peer, "fast_info", None)
+            market_cap = getattr(fast, "market_cap", None) or info.get("marketCap")
+            currency = getattr(fast, "currency", None) or info.get("currency") or "USD"
+            pe = info.get("trailingPE") or info.get("forwardPE")
+            growth = info.get("revenueGrowth")
+            margin = info.get("profitMargins") or info.get("operatingMargins")
+            peers.append({
+                "name": info.get("longName") or name,
+                "ticker": peer_ticker,
+                "market_cap": format_live_peer_value(market_cap, currency),
+                "pe_ratio": f"{pe:.1f}x" if isinstance(pe, (int, float)) and pe > 0 else "N/A",
+                "revenue_growth": f"{growth * 100:+.1f}% " if isinstance(growth, (int, float)) else "N/A",
+                "net_margin": f"{margin * 100:.1f}% " if isinstance(margin, (int, float)) else "N/A",
+                "edge": str(candidate.get("edge") or "Competitive strategic comparison")
+            })
+        except Exception:
+            continue
 
-    return enriched_peers
+    return peers
+
+def format_live_peer_value(value: Any, currency: str) -> str:
+    if not isinstance(value, (int, float)):
+        return "N/A"
+    if value >= 1e12:
+        return f"{currency} {value / 1e12:.2f}T"
+    if value >= 1e9:
+        return f"{currency} {value / 1e9:.2f}B"
+    if value >= 1e6:
+        return f"{currency} {value / 1e6:.2f}M"
+    return f"{currency} {value:,.0f}"
 
 def calculate_health_scores(dossier: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -417,41 +342,6 @@ def generate_executive_memo(dossier: Dict[str, Any]) -> Dict[str, Any]:
             "Illiquid private share capital structure with valuation dependent on broader venture capital market conditions.",
             "Intense competitive friction and potential intellectual property or patent litigation with public rivals.",
             "Execution risk in scaling sales teams and achieving self-funding cash-flow breakeven prior to IPO."
-        ]
-
-    # Specific refinement for Motive Technologies
-    name_lower = company_name.lower()
-    if "motive" in name_lower or "keeptruckin" in name_lower:
-        takeaway = (
-            "Motive Technologies (formerly KeepTruckin) has achieved ~$400M-$500M+ ARR scale in commercial fleet telematics, AI dashcams, and automated field operations. "
-            "With Form S-1 filed for a potential NYSE IPO (MTVE), its core investment narrative balances strong enterprise software adoption against active patent litigation with Samsara."
-        )
-        pros = [
-            "Rapidly growing enterprise ARR ($400M-$500M+ scale) across 120,000+ commercial and logistics customers.",
-            "High-margin software subscription mix powered by AI dashcams, field service agents, and automated safety workflows.",
-            "Tier-1 institutional backing ($150M Series F led by Insight Partners; $149M Series D by Greenoaks Capital) with $2.85B valuation."
-        ]
-        cons = [
-            "Active patent infringement and trade-secret litigation with primary public competitor Samsara (NYSE: IOT).",
-            "High research and development investment required to maintain cutting-edge AI edge hardware against well-funded incumbents.",
-            "Market volatility and timing sensitivity surrounding the public NYSE IPO window (MTVE)."
-        ]
-
-    # Specific refinement for Bureau Veritas
-    if "bureau veritas" in name_lower:
-        takeaway = (
-            "Bureau Veritas SA is an established global Testing, Inspection, and Certification (TIC) leader founded in 1828. "
-            "Under the LEAP | 28 strategic plan, the company is generating consistent ~5% organic growth with expanding operating margins across Commodities, Infrastructure, and Sustainability."
-        )
-        pros = [
-            "Mission-critical statutory compliance testing with high customer switching costs and recurring fee streams.",
-            "Consistent ~5% organic revenue growth and high free-cash-flow conversion supporting growing dividend payouts.",
-            "Strategic leadership in ESG, green energy, mining, and AI-enabled digital asset inspection."
-        ]
-        cons = [
-            "Exposure to global industrial capex slowdowns and commodities volume cycles.",
-            "Margin competition from established Swiss and UK peers (SGS, Eurofins, Intertek).",
-            "Foreign exchange sensitivity across diverse European, Americas, and Asia-Pacific operating divisions."
         ]
 
     return {

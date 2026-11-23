@@ -73,20 +73,20 @@ def main():
     print_banner()
     
     parser = argparse.ArgumentParser(description="Multi-Agent Market Intelligence System")
-    parser.add_argument("--target", "-t", type=str, help="Company name or stock ticker (e.g., OpenAI, Emumba, NVDA, Apple)")
+    parser.add_argument("--target", "-t", type=str, help="Company name or stock ticker")
     args = parser.parse_args()
     
     target = args.target
     if not target:
         try:
-            target = console.input("\n[bold cyan]Enter target company name or stock ticker (e.g. OpenAI, Emumba, NVDA, Apple): [/bold cyan]").strip()
+            target = console.input("\n[bold cyan]Enter target company name or stock ticker: [/bold cyan]").strip()
         except (KeyboardInterrupt, EOFError):
             console.print("\n[red]Exiting.[/red]")
             sys.exit(0)
             
     if not target:
-        target = "OpenAI"
-        console.print(f"[dim]No input provided. Defaulting to: {target}[/dim]")
+        console.print("[red]A target company name or stock ticker is required.[/red]")
+        return
 
     supervisor = ResearchSupervisor()
     results = supervisor.run_investigation(target)

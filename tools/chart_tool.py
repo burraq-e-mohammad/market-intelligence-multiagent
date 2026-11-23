@@ -162,6 +162,35 @@ def extract_chart_data(ticker_obj: Any, info: Dict[str, Any], currency: str = "U
     except Exception:
         pass
 
+    # 3b. Real-time direct zero-auth API integration for historical price closes
+    if len(chart_data["price_history"]) < 5:
+        try:
+            sym_lookup = getattr(ticker_obj, "ticker", "") if hasattr(ticker_obj, "ticker") else (info.get("symbol") or "")
+            if sym_lookup:
+                from tools.finance_tool import fetch_live_chart_direct
+                direct_res = fetch_live_chart_direct(sym_lookup)
+                if direct_res and direct_res.get("closes"):
+                    cls = direct_res["closes"]
+                    if len(cls) >= 5:
+                        pts = []
+                        for i_c, c_val in enumerate(cls):
+                            w_win = cls[max(0, i_c - 49): i_c + 1]
+                            s_ma = round(sum(w_win) / len(w_win), 4) if len(w_win) >= 15 else None
+                            pts.append({"date": f"D-{len(cls)-i_c}", "close": c_val, "sma50": s_ma})
+                        chart_data["price_history"] = pts
+                        first_pt = pts[0]["close"]
+                        last_pt = pts[-1]["close"]
+                        chart_data["price_summary"] = {
+                            "start_date": pts[0]["date"],
+                            "end_date": pts[-1]["date"],
+                            "latest_close": last_pt,
+                            "high_1y": max(cls),
+                            "low_1y": min(cls),
+                            "return_1y_pct": round(((last_pt - first_pt) / first_pt * 100.0), 2) if first_pt > 0 else 0.0
+                        }
+        except Exception:
+            pass
+
     # 4. Fallback to deterministic datasets if live history/financials were blocked or unavailable
     if len(chart_data["price_history"]) < 5 or len(chart_data["annual_financials"]) < 2:
         try:
@@ -179,51 +208,6 @@ def extract_chart_data(ticker_obj: Any, info: Dict[str, Any], currency: str = "U
 
     return chart_data
 
-
-KNOWN_ANNUAL_FINANCIALS = {
-    "MSFT": [
-        {"year": "FY2021", "revenue": 168088000000.0, "net_income": 61271000000.0},
-        {"year": "FY2022", "revenue": 198270000000.0, "net_income": 72738000000.0},
-        {"year": "FY2023", "revenue": 211915000000.0, "net_income": 72361000000.0},
-        {"year": "FY2024", "revenue": 245122000000.0, "net_income": 88136000000.0},
-    ],
-    "NVDA": [
-        {"year": "FY2023", "revenue": 26974000000.0, "net_income": 4368000000.0},
-        {"year": "FY2024", "revenue": 60922000000.0, "net_income": 29760000000.0},
-        {"year": "FY2025", "revenue": 130497000000.0, "net_income": 72880000000.0},
-        {"year": "FY2026", "revenue": 215900000000.0, "net_income": 121200000000.0},
-    ],
-    "AAPL": [
-        {"year": "FY2021", "revenue": 365817000000.0, "net_income": 94680000000.0},
-        {"year": "FY2022", "revenue": 394328000000.0, "net_income": 99803000000.0},
-        {"year": "FY2023", "revenue": 383285000000.0, "net_income": 96995000000.0},
-        {"year": "FY2024", "revenue": 391035000000.0, "net_income": 93736000000.0},
-    ],
-    "TSLA": [
-        {"year": "FY2021", "revenue": 53823000000.0, "net_income": 5519000000.0},
-        {"year": "FY2022", "revenue": 81462000000.0, "net_income": 12583000000.0},
-        {"year": "FY2023", "revenue": 96773000000.0, "net_income": 14997000000.0},
-        {"year": "FY2024", "revenue": 97665000000.0, "net_income": 7091000000.0},
-    ],
-    "AMZN": [
-        {"year": "FY2021", "revenue": 469822000000.0, "net_income": 33364000000.0},
-        {"year": "FY2022", "revenue": 513983000000.0, "net_income": -2722000000.0},
-        {"year": "FY2023", "revenue": 574785000000.0, "net_income": 30425000000.0},
-        {"year": "FY2024", "revenue": 637960000000.0, "net_income": 45180000000.0},
-    ],
-    "BVI.PA": [
-        {"year": "FY2021", "revenue": 4981000000.0, "net_income": 420000000.0},
-        {"year": "FY2022", "revenue": 5647000000.0, "net_income": 483000000.0},
-        {"year": "FY2023", "revenue": 5868000000.0, "net_income": 512000000.0},
-        {"year": "FY2024", "revenue": 6750000000.0, "net_income": 542000000.0},
-    ],
-    "SYS.KA": [
-        {"year": "FY2021", "revenue": 15300000000.0, "net_income": 4380000000.0},
-        {"year": "FY2022", "revenue": 26500000000.0, "net_income": 6610000000.0},
-        {"year": "FY2023", "revenue": 38200000000.0, "net_income": 8690000000.0},
-        {"year": "FY2024", "revenue": 54300000000.0, "net_income": 9890000000.0},
-    ]
-}
 
 def generate_deterministic_chart_data(
     symbol: str,
@@ -329,18 +313,15 @@ def generate_deterministic_chart_data(
     }
 
     annual_fin = []
-    if clean_sym in KNOWN_ANNUAL_FINANCIALS:
-        annual_fin = list(KNOWN_ANNUAL_FINANCIALS[clean_sym])
-    else:
-        tot_rev = _parse_num(info_or_profile.get("total_revenue") or info_or_profile.get("totalRevenue"))
-        if tot_rev and tot_rev > 0:
-            margin_p = _parse_num(info_or_profile.get("profit_margins") or info_or_profile.get("profitMargins")) or 12.0
-            margin_frac = margin_p / 100.0 if margin_p > 1.0 else margin_p
-            annual_fin = [
-                {"year": "FY2022", "revenue": round(tot_rev * 0.78, 2), "net_income": round(tot_rev * 0.78 * margin_frac * 0.85, 2)},
-                {"year": "FY2023", "revenue": round(tot_rev * 0.89, 2), "net_income": round(tot_rev * 0.89 * margin_frac * 0.92, 2)},
-                {"year": "FY2024", "revenue": round(tot_rev, 2), "net_income": round(tot_rev * margin_frac, 2)},
-            ]
+    tot_rev = _parse_num(info_or_profile.get("total_revenue") or info_or_profile.get("totalRevenue"))
+    if tot_rev and tot_rev > 0:
+        margin_p = _parse_num(info_or_profile.get("profit_margins") or info_or_profile.get("profitMargins")) or 12.0
+        margin_frac = margin_p / 100.0 if margin_p > 1.0 else margin_p
+        annual_fin = [
+            {"year": "FY2022", "revenue": round(tot_rev * 0.78, 2), "net_income": round(tot_rev * 0.78 * margin_frac * 0.85, 2)},
+            {"year": "FY2023", "revenue": round(tot_rev * 0.89, 2), "net_income": round(tot_rev * 0.89 * margin_frac * 0.92, 2)},
+            {"year": "FY2024", "revenue": round(tot_rev, 2), "net_income": round(tot_rev * margin_frac, 2)},
+        ]
 
     margins = []
     for lbl, key1, key2 in [

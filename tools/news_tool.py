@@ -114,20 +114,18 @@ def build_anchored_news_query(
     raw_anchors = list(resolved_entity.get("required_search_anchors") or []) if resolved_entity else []
     negatives = list(resolved_entity.get("negative_keywords") or []) if resolved_entity else []
 
-    # Filter out bare trade name itself from anchors so ("Motive" AND ("Motive" OR ...)) NEVER collapses to bare "Motive"!
+    # Filter out bare trade name itself from anchors so ("Brand" AND ("Brand" OR ...)) NEVER collapses to bare "Brand"!
     distinct_anchors = [a.strip() for a in raw_anchors if a and a.strip().lower() != trade_low]
 
     if resolved_entity and distinct_anchors:
-        # Separate standalone strong brand aliases (e.g. "Motive Technologies", "KeepTruckin", "JazzCash", "CMPak")
-        # from contextual domain keywords (e.g. "fleet", "telematics", "dashcam", "Shoaib Makani")
+        # Separate standalone strong brand aliases from contextual domain keywords
         strong_aliases = []
         context_anchors = []
         for a in distinct_anchors:
             a_low = a.lower()
             is_brand_alias = (
-                (trade_low in a_low and len(a.split()) >= 2)  # e.g. "Motive Technologies", "Jazz Pakistan"
-                or a_low in ("keeptruckin", "jazzcash", "cmpak", "jazzworld", "pmcl", "ptml")
-                or (a.isupper() and len(a) >= 3 and a_low not in ("pta", "hbm", "ipo", "ceo", "cfo"))
+                (trade_low in a_low and len(a.split()) >= 2)
+                or (a.isupper() and 2 <= len(a) <= 6 and a_low not in ("ipo", "ceo", "cfo", "sec", "coo", "cto"))
             )
             if is_brand_alias and len(strong_aliases) < 3:
                 strong_aliases.append(f'"{a}"' if " " in a else a)
@@ -135,7 +133,7 @@ def build_anchored_news_query(
                 context_anchors.append(f'"{a}"' if " " in a else a)
 
         if not context_anchors:
-            # Fall back to sector / HQ tokens so ("Trade" AND (...)) is always strictly anchored
+            # Fall back to sector / HQ tokens so ("Trade" AND (...)) is strictly anchored
             hq = (resolved_entity.get("headquarters") or "").split(",")[-1].strip()
             sec = (resolved_entity.get("sector") or "").split("&")[0].strip()
             if sec and sec.lower() != trade_low:
@@ -143,7 +141,7 @@ def build_anchored_news_query(
             if hq and hq.lower() not in ("global", trade_low):
                 context_anchors.append(f'"{hq}"' if " " in hq else hq)
             if not context_anchors:
-                context_anchors = ["company", "software", "enterprise", "revenue"]
+                context_anchors = ["company", "enterprise", "industry", "revenue", "commercial"]
 
         trade_clause = f'("{trade}" AND ({" OR ".join(context_anchors[:5])}))'
         if strong_aliases:
@@ -213,7 +211,7 @@ def is_relevant_article(
         or (clean_sym and len(clean_sym) >= 3 and bool(re.search(rf'\b{re.escape(clean_sym)}\b', combined)))
         or any(
             (trade_lower in a and len(a.split()) >= 2 and a in combined)
-            or (a in ("keeptruckin", "jazzcash", "cmpak", "shoaib makani", "samsara", "mtve") and a in combined)
+            or (len(a) >= 4 and a in combined)
             for a in anchors_lower
         )
     )
@@ -244,14 +242,7 @@ def is_relevant_article(
     if is_tangential_soundbite and not is_material_policy:
         return False
 
-    # 4. False prefix guard for 'Systems Limited'
-    m = re.search(r'([A-Za-z0-9]+)\s+Systems\s+Limited', title, re.IGNORECASE)
-    if m and clean_name_lower == "systems limited":
-        prev_word = m.group(1).lower()
-        if prev_word not in ['the', 'at', 'in', 'of', 'for', 'about', 'and', 'from', 'with', 'to']:
-            return False
-
-    # 5. Positive entity + anchor/sector/geography match
+    # 4. Positive entity + anchor/sector/geography match
     mentions_entity = (
         clean_name_lower in combined
         or bool(re.search(rf'\b{re.escape(trade_lower)}\b', combined))
@@ -397,4 +388,7 @@ def get_company_news(
 
 if __name__ == "__main__":
     import json
-    print(json.dumps(get_company_news("Systems Limited", symbol="SYS.KA", max_results=3), indent=2))
+    import sys
+    target = sys.argv[1] if len(sys.argv) > 1 else input("Enter a company name or ticker: ").strip()
+    if target:
+        print(json.dumps(get_company_news(target, max_results=3), indent=2))

@@ -258,17 +258,7 @@ with st.sidebar:
         st.info(f"🟡 **Direct Agent Mode** | ⚡ **Active LLM**: {cfg['PROVIDER'].upper()}")
         
     st.divider()
-    st.markdown("### 💡 Quick Search Examples")
     preset = None
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Microsoft", **STRETCH_KW): preset = "Microsoft"
-        if st.button("NVIDIA", **STRETCH_KW): preset = "NVIDIA"
-        if st.button("Apple", **STRETCH_KW): preset = "Apple"
-    with col2:
-        if st.button("OpenAI", **STRETCH_KW): preset = "OpenAI"
-        if st.button("Tesla", **STRETCH_KW): preset = "Tesla"
-        if st.button("Amazon", **STRETCH_KW): preset = "Amazon"
 
 # Header
 st.markdown('<div class="main-header">Autonomous Market & Company Intelligence</div>', unsafe_allow_html=True)
@@ -283,7 +273,7 @@ if "qa_history" not in st.session_state:
 target_input = st.text_input(
     "Enter Company Name or Stock Ticker:",
     value=preset if preset else "",
-    placeholder="e.g. Microsoft, Apple, NVIDIA, OpenAI, Tesla, Amazon, Systems Limited..."
+    placeholder="Enter a company name or stock ticker..."
 )
 
 execute_btn = st.button("🔍 Launch Deep Multi-Agent Investigation", type="primary", **STRETCH_KW)
@@ -695,11 +685,15 @@ if active_research and active_research.get("dossier"):
         s3.metric("Functional Currency", str(resolved_entity.get("local_currency", "Local")))
         s4.metric("Scale / Subs", str(sub_kpis.get("subscribers", "Regional Operator")).split("(")[0].strip())
     else:
+        priv_fin = resolved_entity.get("private_financials") or metrics.get("private_financials") or dossier.get("shared_state", {}).get("private_financials") or {}
+        val_str = priv_fin.get("latest_valuation_headline") or "Private Valuation"
+        fund_str = priv_fin.get("latest_funding_headline") or "Venture Funding"
+        rev_str = priv_fin.get("latest_revenue_headline") or "Commercial Scale"
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("Entity Classification", "Privately Held")
-        p2.metric("Public Trading", "Unlisted")
-        p3.metric("Ownership Structure", "Private / Strategic")
-        p4.metric("Market Valuation", "Private Rounds")
+        p2.metric("Latest Valuation", val_str)
+        p3.metric("Capital Raised", fund_str)
+        p4.metric("Commercial Scale", rev_str)
 
     # Executive Summary Box
     st.markdown("### 🧠 Executive Summary & Strategic Synthesis")

@@ -387,13 +387,27 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
             acq_str = f"{target} (closed {year}" + (f", {amount})" if amount else ")")
             acquisitions.append(acq_str)
 
-    # 4. Extract Key Divisions & Products from headers or text
+    # 4. Extract Key Divisions & Products from headers or text dynamically
     segments = []
-    seg_section_matches = re.finditer(r'###+\s*([A-Za-z0-9\s\&]+(?:Products?|Services?|Operations?|Divisions?|Segments?|Hardware|Software|Platforms?))\s*\n([^\#]+)', body)
+    seg_section_matches = re.finditer(r'###+\s*([A-Za-z0-9\s\&]+(?:Products?|Services?|Operations?|Divisions?|Segments?|Hardware|Software|Platforms?|Vehicles?|Engines?|Spacecraft|Constellations?|Applications?|Solutions?|Offerings?))\s*\n([^\#]+)', body)
     for m in seg_section_matches:
         sec_title = m.group(1).strip()
-        if len(sec_title) < 40 and sec_title not in segments:
+        if len(sec_title) < 45 and sec_title not in segments:
             segments.append(sec_title)
+
+    # Dynamic fallback: Extract major operational section titles excluding meta/admin headers
+    if not segments:
+        excluded_headers = {
+            "history", "origins", "founding", "reception", "controversies", "controversy",
+            "criticism", "lawsuits", "litigation", "see also", "references", "external links",
+            "notes", "bibliography", "early history", "governance", "leadership", "further reading"
+        }
+        for m in re.finditer(r'##\s+([A-Za-z0-9\s\&,\-]{3,40})\n', body):
+            h = m.group(1).strip()
+            if h.lower() not in excluded_headers and len(h) <= 40 and h not in segments:
+                segments.append(h)
+            if len(segments) >= 5:
+                break
 
     # 5. Extract Private-Enterprise Valuation, Funding Rounds, ARR & Burn Excerpts (for private/unlisted firms)
     private_financials = extract_private_financial_profile(text)
@@ -775,7 +789,11 @@ def get_company_biography(
     return fetch_verified_media_profile(company_name, business_summary=business_summary)
 
 if __name__ == "__main__":
-    res = get_company_biography("NETSOL Technologies Inc.")
+    import sys
+    target = sys.argv[1] if len(sys.argv) > 1 else input("Enter a company name: ").strip()
+    if not target:
+        raise SystemExit(1)
+    res = get_company_biography(target)
     print("NETSOL Source:", res["source"])
     print("Page Title:", res["company"])
     print("Content Length:", len(res["detailed_content"]))

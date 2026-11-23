@@ -196,30 +196,103 @@ class IntelligenceReportPDF(FPDF):
         clean_title = sanitize_text(title.replace("#", "").strip())
         self.multi_cell(0, 6, clean_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
+    def _render_markdown_table(self, table_lines: List[str]):
+        """Renders raw markdown pipe tables into clean, bounded PDF table grids."""
+        parsed_rows = []
+        for raw_line in table_lines:
+            cells = [c.strip() for c in raw_line.strip('|').split('|')]
+            # Skip delimiter row like | :--- | :--- |
+            if all(re.match(r'^:?-+:?$', c) for c in cells if c):
+                continue
+            parsed_rows.append(cells)
+
+        if not parsed_rows:
+            return
+
+        num_cols = max(len(r) for r in parsed_rows)
+        if num_cols == 0:
+            return
+
+        # Distribute 190mm across columns cleanly
+        if num_cols == 4:
+            col_widths = [42, 54, 46, 48]
+        elif num_cols == 3:
+            col_widths = [50, 70, 70]
+        elif num_cols == 2:
+            col_widths = [70, 120]
+        else:
+            col_widths = [190.0 / num_cols] * num_cols
+
+        # Page break check
+        needed_h = len(parsed_rows) * 6 + 4
+        if self.get_y() + needed_h > self.page_break_trigger:
+            self.add_page()
+
+        self.ln(2)
+        for r_idx, row in enumerate(parsed_rows):
+            is_header = (r_idx == 0)
+            if is_header:
+                self.set_font("Helvetica", "B", 7.5)
+                self.set_fill_color(226, 232, 240)
+                self.set_text_color(15, 23, 42)
+            else:
+                self.set_font("Helvetica", "", 7.0)
+                if r_idx % 2 == 1:
+                    self.set_fill_color(255, 255, 255)
+                else:
+                    self.set_fill_color(248, 250, 252)
+                self.set_text_color(51, 65, 85)
+
+            self.set_x(self.l_margin)
+            for c_idx in range(num_cols):
+                w = col_widths[c_idx]
+                val = row[c_idx] if c_idx < len(row) else ""
+                clean_val = sanitize_text(val.replace("**", "").replace("__", "").strip())
+                self.cell(w, 5.5, clean_val[:45], border=1, fill=True)
+            self.ln(5.5)
+        self.ln(2)
+
     def body_paragraph(self, text: str):
         lines = text.split("\n")
-        for line in lines:
-            line = line.strip()
+        i = 0
+        n_lines = len(lines)
+        while i < n_lines:
+            line = lines[i].strip()
             if not line:
                 self.ln(1.5)
+                i += 1
                 continue
             if line.startswith("#"):
                 self.sub_section_title(line)
-            else:
-                self.set_font("Helvetica", "", 9.5)
-                self.set_text_color(51, 65, 85) # Slate text
-                clean_text = sanitize_text(line)
-                # Page-break-inside: avoid for short/medium paragraphs (<= 6 wrapped lines) to prevent awkward splits/overlaps
-                try:
-                    wrapped = self.multi_cell(0, 5, clean_text, dry_run=True, output="LINES")
-                    needed_h = len(wrapped) * 5 + 2
-                    if len(wrapped) <= 6 and (self.get_y() + needed_h > self.page_break_trigger):
-                        self.add_page()
-                except Exception:
-                    pass
-                self.set_x(self.l_margin)
-                self.multi_cell(0, 5, clean_text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                self.ln(1)
+                i += 1
+                continue
+            if line.startswith("|") and line.endswith("|"):
+                # Collect all contiguous table lines
+                table_lines = []
+                while i < n_lines and lines[i].strip().startswith("|") and lines[i].strip().endswith("|"):
+                    table_lines.append(lines[i].strip())
+                    i += 1
+                
+                # Render table lines as a clean bounded FPDF2 table
+                if len(table_lines) >= 2:
+                    self._render_markdown_table(table_lines)
+                continue
+
+            self.set_font("Helvetica", "", 9.5)
+            self.set_text_color(51, 65, 85) # Slate text
+            clean_text = sanitize_text(line)
+            # Page-break-inside: avoid for short/medium paragraphs (<= 6 wrapped lines) to prevent awkward splits/overlaps
+            try:
+                wrapped = self.multi_cell(0, 5, clean_text, dry_run=True, output="LINES")
+                needed_h = len(wrapped) * 5 + 2
+                if len(wrapped) <= 6 and (self.get_y() + needed_h > self.page_break_trigger):
+                    self.add_page()
+            except Exception:
+                pass
+            self.set_x(self.l_margin)
+            self.multi_cell(0, 5, clean_text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.ln(1)
+            i += 1
 
 def generate_pdf_report(
     report_data: Dict[str, Any],
@@ -293,11 +366,20 @@ def generate_pdf_report(
         ]
     else:
         pdf.section_title("1. Corporate Structure & Private Enterprise Profile")
+        priv_fin = resolved_entity.get("private_financials") or metrics.get("private_financials") or report_data.get("shared_state", {}).get("private_financials") or {}
+        val_hl = priv_fin.get("latest_valuation_headline") or "Private Institutional Valuation"
+        fund_hl = priv_fin.get("latest_funding_headline") or "Venture & Strategic Capital"
+        rev_hl = priv_fin.get("latest_revenue_headline") or "Private Commercial Scale"
+        ipo_hl = priv_fin.get("ipo_status_headline") or "Exempt from SEC Form 10-K"
+        founders = (resolved_entity.get("founding_info") or "Private Founders & Strategic Investors")[:34]
+        leaders_list = report_data.get("shared_state", {}).get("verified_leadership") or resolved_entity.get("verified_leadership") or []
+        lead_str = leaders_list[0][:34] if leaders_list else "Strategic Executive Board"
+
         kpis = [
-            ("Entity Type", "Privately Held Entity", "Trading Status", "Unlisted (No SEC Ticker)"),
-            ("Ownership", "Private / Strategic / Founder", "Reporting", "Exempt from SEC 10-K Filings"),
-            ("Capital Basis", "Private Financing Rounds", "Market Access", "Secondary / Direct Equity"),
-            ("Primary Domain", "Technology & Services", "Financial Audit", "Private Corporate Books")
+            ("Entity Type", "Privately Held Enterprise", "Latest Valuation", str(val_hl)[:34]),
+            ("Ownership", founders, "Documented Capital", str(fund_hl)[:34]),
+            ("Commercial Scale", str(rev_hl)[:34], "Regulatory Status", str(ipo_hl)[:34]),
+            ("Leadership", lead_str, "Market Access", "Secondary / Direct Equity")
         ]
     
     pdf.set_font("Helvetica", "B", 8.5)

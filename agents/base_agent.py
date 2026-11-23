@@ -21,21 +21,24 @@ class BaseAgent:
         groq_key = cfg["GROQ_API_KEY"]
         full_prompt = f"{self.system_prompt}\n\nTask Instructions:\n{user_prompt}"
 
-        # 1. Try Gemini with lightweight/fast model
+        # 1. Try Gemini with lightweight/fast model and failover candidates
         if (provider == "gemini" or not provider or provider != "mock") and gemini_key:
             try:
                 from google import genai
                 client = genai.Client(api_key=gemini_key)
                 
-                # Primary fast model
-                response = client.models.generate_content(
-                    model=cfg["GEMINI_MODEL"],
-                    contents=full_prompt,
-                )
-                if response and response.text and len(response.text.strip()) > 30:
-                    return response.text.strip()
-            except Exception as e:
-                # If Gemini hits high demand or error, failover to Groq
+                gemini_candidates = list(dict.fromkeys([cfg["GEMINI_MODEL"], "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"]))
+                for g_model in gemini_candidates:
+                    try:
+                        response = client.models.generate_content(
+                            model=g_model,
+                            contents=full_prompt,
+                        )
+                        if response and response.text and len(response.text.strip()) > 30:
+                            return response.text.strip()
+                    except Exception:
+                        continue
+            except Exception:
                 pass
 
         # 2. Try Groq (Ultra-fast, 0.8s latency)
@@ -45,19 +48,24 @@ class BaseAgent:
                 client = OpenAI(
                     base_url="https://api.groq.com/openai/v1",
                     api_key=groq_key,
-                    timeout=5.0,
+                    timeout=6.0,
                     max_retries=1
                 )
-                response = client.chat.completions.create(
-                    model=cfg["GROQ_MODEL"],
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.3
-                )
-                if response and response.choices and response.choices[0].message.content:
-                    return response.choices[0].message.content.strip()
+                groq_candidates = list(dict.fromkeys([cfg["GROQ_MODEL"], "openai/gpt-oss-120b", "qwen/qwen3.8-27b"]))
+                for q_model in groq_candidates:
+                    try:
+                        response = client.chat.completions.create(
+                            model=q_model,
+                            messages=[
+                                {"role": "system", "content": self.system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            temperature=0.3
+                        )
+                        if response and response.choices and response.choices[0].message.content:
+                            return response.choices[0].message.content.strip()
+                    except Exception:
+                        continue
             except Exception:
                 pass
 
