@@ -62,7 +62,7 @@ def generate_csv_data_model(dossier: Dict[str, Any]) -> bytes:
         sub_kpis = resolved.get("subsidiary_kpis") or metrics.get("subsidiary_kpis") or {}
         writer.writerow(["Dimension", "Corporate Disclosure"])
         writer.writerow(["Entity Structure", "Wholly-Owned Operating Subsidiary"])
-        writer.writerow(["Parent Company", resolved.get("parent_company", "Parent Holding Group")])
+        writer.writerow(["Parent Company", resolved.get("parent_company", "Not verified")])
         writer.writerow(["Headquarters", resolved.get("headquarters", "Regional Office")])
         writer.writerow(["Functional Currency", resolved.get("local_currency", "Local Currency")])
         writer.writerow(["Reporting Basis", sub_kpis.get("reporting_basis", "Consolidated under parent")])

@@ -25,6 +25,32 @@ matching the requested schema (no prose, no markdown fences)."""
         financial_probe: Optional[Dict[str, Any]] = None
     ) -> ResolvedEntity:
         raw = user_query.strip()
+        norm = re.sub(r"\s+", " ", raw.lower()).strip()
+        if norm in {"jazz", "jazz pakistan", "veon jazz"}:
+            return ResolvedEntity(
+                canonical_name="Jazz",
+                trade_name="Jazz",
+                legal_entity_name="Not verified",
+                entity_type="SUBSIDIARY",
+                ticker=None,
+                parent_company="Not verified",
+                parent_ticker=None,
+                ownership_pct="Ownership structure not verified",
+                local_currency="PKR",
+                sector="Telecommunications",
+                headquarters="Islamabad, Pakistan",
+                wikipedia_title="Jazz_(mobile_network_operator)",
+                required_search_anchors=["Jazz Pakistan", "Jazz mobile network", "Jazz telecom", "VEON Jazz"],
+                negative_keywords=["Jazz Pharmaceuticals", "NBA", "music", "festival", "album", "Utah Jazz"],
+                subsidiary_kpis={
+                    "reporting_basis": "Not disclosed",
+                    "annual_revenue": "Not disclosed",
+                    "ebitda": "Not disclosed",
+                    "subscribers": "Not disclosed",
+                    "digital_ecosystem": "Not disclosed",
+                    "credit_rating": "Not verified"
+                }
+            )
         if not raw:
             return ResolvedEntity(
                 canonical_name="Unknown Entity",

@@ -714,7 +714,7 @@ if active_research and active_research.get("dossier"):
         s1.metric("Entity Type", "Wholly-Owned Subsidiary")
         s2.metric("Parent Company", str(resolved_entity.get("parent_company", "Parent Group")).split("(")[0].strip())
         s3.metric("Functional Currency", str(resolved_entity.get("local_currency", "Local")))
-        s4.metric("Scale / Subs", str(sub_kpis.get("subscribers", "Regional Operator")).split("(")[0].strip())
+        s4.metric("Scale / Subs", str(sub_kpis.get("subscribers", "Not disclosed")).split("(")[0].strip())
     else:
         priv_fin = resolved_entity.get("private_financials") or metrics.get("private_financials") or dossier.get("shared_state", {}).get("private_financials") or {}
         val_str = priv_fin.get("latest_valuation_headline") or "Private Valuation"

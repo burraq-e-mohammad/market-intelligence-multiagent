@@ -358,12 +358,12 @@ def generate_pdf_report(
         pdf.section_title("1. Subsidiary Ownership & Operating Profile")
         sub_kpis = resolved_entity.get("subsidiary_kpis") or metrics.get("subsidiary_kpis") or {}
         parent_co = resolved_entity.get("parent_company") or metrics.get("parent_company") or "Parent Group"
-        legal_name = resolved_entity.get("legal_entity_name") or company
+        legal_name = resolved_entity.get("legal_entity_name") or "Not verified"
         currency = resolved_entity.get("local_currency") or "Local"
         hq = resolved_entity.get("headquarters") or "Regional"
         rev_short = (sub_kpis.get("annual_revenue") or f"Consolidated under {parent_co}")[:34]
-        subs_short = (sub_kpis.get("subscribers") or "Regional Market Leader")[:34]
-        credit_short = (sub_kpis.get("credit_rating") or f"Backed by {parent_co}")[:34]
+        subs_short = (sub_kpis.get("subscribers") or "Not disclosed")[:34]
+        credit_short = (sub_kpis.get("credit_rating") or "Not verified")[:34]
         kpis = [
             ("Entity Type", "Wholly-Owned Subsidiary", "Parent Company", parent_co[:34]),
             ("Legal Entity", legal_name[:34], "Headquarters", hq[:34]),
