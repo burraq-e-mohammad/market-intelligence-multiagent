@@ -629,7 +629,13 @@ def render_financial_charts_to_pdf(
         pass
     try:
         if len(annual_financials) >= 2:
-            _draw_annual_financials_chart(pdf, annual_financials, currency, ticker)
+            reporting_currency = chart_data.get("reporting_currency") or currency
+            _draw_annual_financials_chart(
+                pdf,
+                annual_financials,
+                reporting_currency,
+                ticker
+            )
             rendered += 1
     except Exception:
         pass

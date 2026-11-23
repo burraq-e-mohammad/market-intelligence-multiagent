@@ -870,7 +870,7 @@ if active_research and active_research.get("dossier"):
                                 tooltip=[
                                     alt.Tooltip("Year:N", title="Fiscal Year"),
                                     alt.Tooltip("Metric:N", title="Metric"),
-                                    alt.Tooltip("Value_B:Q", title=f"Amount ({c_curr} B)", format=",.2f"),
+                                    alt.Tooltip("Value_B:Q", title=f"Amount ({reporting_curr} B)", format=",.2f"),
                                 ]
                             ).properties(height=260)
                             st.altair_chart(bar_chart, **STRETCH_KW)

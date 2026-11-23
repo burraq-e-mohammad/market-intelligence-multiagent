@@ -395,19 +395,6 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
         if len(sec_title) < 45 and sec_title not in segments:
             segments.append(sec_title)
 
-    # Dynamic fallback: Extract major operational section titles excluding meta/admin headers
-    if not segments:
-        excluded_headers = {
-            "history", "origins", "founding", "reception", "controversies", "controversy",
-            "criticism", "lawsuits", "litigation", "see also", "references", "external links",
-            "notes", "bibliography", "early history", "governance", "leadership", "further reading"
-        }
-        for m in re.finditer(r'##\s+([A-Za-z0-9\s\&,\-]{3,40})\n', body):
-            h = m.group(1).strip()
-            if h.lower() not in excluded_headers and len(h) <= 40 and h not in segments:
-                segments.append(h)
-            if len(segments) >= 5:
-                break
 
     # 5. Extract Private-Enterprise Valuation, Funding Rounds, ARR & Burn Excerpts (for private/unlisted firms)
     private_financials = extract_private_financial_profile(text)

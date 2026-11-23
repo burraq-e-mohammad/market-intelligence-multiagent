@@ -125,8 +125,9 @@ def generate_csv_data_model(dossier: Dict[str, Any]) -> bytes:
     curr = chart_data.get("currency", "USD")
 
     if ann_fin:
-        writer.writerow([f"--- HISTORICAL ANNUAL FINANCIALS ({curr}) ---"])
-        writer.writerow(["Fiscal Year", f"Revenue ({curr})", f"Net Income ({curr})"])
+        reporting_curr = chart_data.get("reporting_currency") or curr
+        writer.writerow([f"--- HISTORICAL ANNUAL FINANCIALS ({reporting_curr}) ---"])
+        writer.writerow(["Fiscal Year", f"Revenue ({reporting_curr})", f"Net Income ({reporting_curr})"])
         for r in ann_fin:
             rev_val = f"{r.get('revenue', 0):,}" if r.get("revenue") is not None else "N/A"
             net_val = f"{r.get('net_income', 0):,}" if r.get("net_income") is not None else "N/A"

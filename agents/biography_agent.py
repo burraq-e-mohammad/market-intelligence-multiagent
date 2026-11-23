@@ -77,6 +77,8 @@ CRITICAL UNIVERSAL DIRECTIVES:
    - If the company belongs to a wider conglomerate/chaebol, NEVER list separately listed sister affiliates (e.g., separate insurance, shipbuilding, or biopharma affiliates) as internal operating divisions of {company_name}.
 3. Section 3 (Competitive Moat & Strategic Industry Positioning):
    - Analyze architectural moats, proprietary ecosystems, intellectual property, and customer retention dynamics.
+   - Do not invent patents, plant counts, output volumes, market-share, capacity, or future targets unless the exact fact appears in the SOURCE DOSSIER or LIVE BUSINESS DESCRIPTION.
+   - If operating segments are not explicitly verified, write "Segment breakdown not retrieved from public filings" and do not invent a sole segment or division.
 4. NEGATIVE DIRECTIVE: NEVER use meta-prompt terms like 'canonical', 'provided', 'supplied', or 'prompt' in your output.
 
 Format strictly into 3 sections:
