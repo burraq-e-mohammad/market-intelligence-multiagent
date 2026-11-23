@@ -140,8 +140,8 @@ Deliver an in-depth, professional briefing."""
                 sec2_text += f"\n\nIn corporate governance, key executive updates include: {'; '.join(g.rstrip('. ') for g in gov_events)}."
 
             sec3_text = (
-                f"As industry competition accelerates, primary risk factors center on enterprise budget cycles, "
-                f"execution agility, and broader macroeconomic technology trends."
+                f"As industry competition accelerates, primary risks should remain company-specific, including "
+                f"execution, supply-chain continuity, regulatory exposure, and competitive positioning."
             )
             if reg_risks:
                 sec3_text += f"\n\nFrom a regulatory perspective, market observers are monitoring: {'; '.join(r.rstrip('. ') for r in reg_risks)}."

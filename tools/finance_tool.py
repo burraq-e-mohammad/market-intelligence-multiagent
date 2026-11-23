@@ -443,6 +443,13 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                         "return_1y_pct": round(((closes[-1] - closes[0]) / closes[0] * 100.0), 2) if closes[0] > 0 else 0.0
                     }
 
+            # Preserve the live 52-week feed as the chart summary rather than
+            # substituting a shorter/direct-feed price range.
+            if isinstance(fifty_two_week_low, (int, float)) and isinstance(fifty_two_week_high, (int, float)):
+                chart_summary = chart_data.setdefault("price_summary", {})
+                chart_summary["high_1y"] = fifty_two_week_high
+                chart_summary["low_1y"] = fifty_two_week_low
+
             return {
                 "status": "success",
                 "is_public": True,

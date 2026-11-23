@@ -358,6 +358,33 @@ class QualityAssuranceAgent:
             text = re.sub(r'\bB2B\s+SaaS\s+subscriptions?\b', 'core regional commercial operations', text, flags=re.IGNORECASE)
 
         # E. Dynamic Leadership Governance Sanitization
+        breaking_gov = shared_state.get("breaking_governance") or []
+        interim_ceo_supported = any(
+            re.search(r'\binterim\s+ceo\b', str(event), re.IGNORECASE)
+            for event in breaking_gov
+        )
+        if not interim_ceo_supported:
+            text = re.sub(
+                r'\b([A-Z][A-Za-z]+\s+[A-Z][A-Za-z]+)\s*\([^)]*(?:interim\s+CEO)[^)]*\)',
+                lambda m: re.sub(r'\s*\([^)]*\)', '', m.group(0), flags=re.IGNORECASE),
+                text,
+                flags=re.IGNORECASE
+            )
+            text = re.sub(r'\binterim\s+CEO(?:\s+arrangement)?\b', 'executive leadership team', text, flags=re.IGNORECASE)
+            text = re.sub(r'\bpermanent\s+CEO\s+appointment\b', 'ongoing executive succession planning', text, flags=re.IGNORECASE)
+
+        text = re.sub(
+            r'(?:DC|D\.C\.)(?:\s+)(?:presumably\s+)?(?:a\s+)?(?:major\s+)?(?:partner|content partner|partner)',
+            'an unspecified partner',
+            text,
+            flags=re.IGNORECASE
+        )
+        text = re.sub(
+            r'(?:presumably\s+|speculation\s+about\s+)an\s+unspecified\s+partner',
+            'an unnamed partner',
+            text,
+            flags=re.IGNORECASE
+        )
         # If verified leadership does NOT contain a COO, strip generic hallucinated COO phrases
         has_coo = any("coo" in l.lower() or "chief operating" in l.lower() for l in verified_leadership)
         if not has_coo:

@@ -292,6 +292,8 @@ def fetch_wikipedia_infobox_officers(page_title: str) -> List[VerifiedOfficer]:
             pm = re.match(r'^([A-Z][A-Za-z\.\-\s]{2,45}?)\s*\(([^\)]{2,80})\)', line)
             if pm:
                 cand_name, cand_title = pm.group(1).strip(), pm.group(2).strip()
+                if "interim ceo" in cand_title.lower():
+                    continue
                 if any(f in cand_title.lower() for f in ["former", "ex-", "resigned", "retired", "emeritus"]):
                     continue
                 try:

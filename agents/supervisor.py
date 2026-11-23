@@ -467,7 +467,7 @@ STRATEGIC_OUTLOOK:
                 
                 clean_reg_join = "; ".join(r.rstrip(". ") for r in breaking_reg)
                 reg_risk_str = f"\n\n### Regulatory, Legal & Geopolitical Scrutiny\nKey regulatory observation points include: {clean_reg_join}. The enterprise actively maintains compliance mechanisms to navigate international and trade requirements." if breaking_reg else (
-                    "\n\n### Critical Risk Factors & Vulnerabilities\nPrimary operational and macro risks include foreign exchange volatility, competitive talent retention, potential enterprise IT budget rationalization, and evolving regulatory standards."
+                    "\n\n### Critical Risk Factors & Vulnerabilities\nPrimary risks include company-specific demand cyclicality, supply-chain execution, foreign exchange exposure, regulatory compliance, and competitive pressure."
                 )
                 
                 growth_segments = f"across core operating lines including {', '.join(verified_segments)}" if verified_segments else "through international expansion and higher-margin platform delivery"
