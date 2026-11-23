@@ -551,8 +551,13 @@ STRATEGIC_OUTLOOK:
         # Generate In-Memory Report (No disk files created)
         emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade in-memory PDF dossier...", progress=94, progress_cap=98)
         pdf_bytes = generate_pdf_report(final_dossier)
+        elapsed_time = round(time.time() - start_time, 2)
         
-        emit("Research Supervisor", "Parent Director", "complete", f"Investigation completed successfully in {elapsed_time}s! All dossiers verified.", progress=100, progress_cap=100)
+        if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) < 100:
+            emit("Publisher", "PDF & Dossier Publisher", "error", "PDF publication failed; no downloadable report was generated.", progress=98, progress_cap=99)
+            raise RuntimeError("PDF publication failed")
+
+        emit("Research Supervisor", "Parent Director", "complete", f"Investigation completed successfully in {elapsed_time}s! PDF and dossier ready.", progress=100, progress_cap=100)
         print(f"\n[Parent Agent: {self.name}] Investigation completed in {elapsed_time}s! (In-memory, 0 disk files created)")
         
         return {

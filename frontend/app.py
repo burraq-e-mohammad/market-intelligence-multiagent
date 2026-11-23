@@ -459,12 +459,7 @@ if execute_btn or preset:
                             elif item_type == "done":
                                 results = item.get("results", {})
                                 dossier = results.get("dossier")
-                                pdf_b64 = results.get("pdf_b64")
-                                if pdf_b64:
-                                    import base64
-                                    pdf_bytes = base64.b64decode(pdf_b64)
-                                else:
-                                    pdf_bytes = results.get("pdf_bytes")
+                                pdf_bytes = None
                                 execution_time = results.get("execution_time")
                             elif item_type == "error":
                                 error_message = item.get("error")
@@ -595,10 +590,6 @@ if active_research and active_research.get("dossier"):
     
     with header_col2:
         # Download PDF & Excel/CSV Buttons (In-memory, 0 disk files)
-        if not pdf_bytes and dossier:
-            from tools.pdf_tool import generate_pdf_report
-            pdf_bytes = generate_pdf_report(dossier)
-            
         import re
         comp_name = dossier.get("company_name", query_target)
         first_word = comp_name.split()[0] if comp_name else query_target
@@ -608,14 +599,14 @@ if active_research and active_research.get("dossier"):
         
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
-            if pdf_bytes:
-                st.download_button(
-                    label="📄 PDF Dossier",
-                    data=pdf_bytes,
-                    file_name=f"{file_base}_intelligence_dossier.pdf",
-                    mime="application/pdf",
-                    **STRETCH_KW
-                )
+            safe_href = f"{API_BASE_URL}/api/pdf?target={requests.utils.quote(query_target)}"
+            st.markdown(
+                f"<a href=\"{safe_href}\" target=\"_blank\" "
+                f"style=\"display:block;text-align:center;padding:.55rem .8rem;"
+                f"border-radius:.5rem;background:#1D4ED8;color:white;text-decoration:none;"
+                f"font-weight:700;\">📄 PDF Dossier</a>",
+                unsafe_allow_html=True
+            )
         with btn_col2:
             from tools.export_tool import generate_excel_or_csv_export
             csv_bytes, csv_fn, csv_mime = generate_excel_or_csv_export(dossier)
@@ -799,6 +790,7 @@ if active_research and active_research.get("dossier"):
 
                 st.markdown("### 📊 Interactive Market Performance & Financial Charts")
                 c_curr = chart_data.get("currency", "USD")
+                reporting_curr = chart_data.get("reporting_currency", c_curr)
                 price_hist = chart_data.get("price_history") or []
                 price_sum = chart_data.get("price_summary") or {}
 
@@ -856,7 +848,7 @@ if active_research and active_research.get("dossier"):
 
                     if len(ann_fin) >= 2:
                         with ch_col1:
-                            st.caption(f"**Annual Revenue vs. Net Income ({c_curr} Billions)**")
+                            st.caption(f"**Annual Revenue vs. Net Income ({reporting_curr} Billions)**")
                             rows_long = []
                             for r in ann_fin:
                                 if r.get("revenue") is not None:
@@ -867,7 +859,7 @@ if active_research and active_research.get("dossier"):
                             bar_chart = alt.Chart(df_ann).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
                                 x=alt.X("Year:N", title="Fiscal Year", axis=alt.Axis(labelAngle=0)),
                                 xOffset="Metric:N",
-                                y=alt.Y("Value_B:Q", title=f"{c_curr} (Billions)"),
+                                y=alt.Y("Value_B:Q", title=f"{reporting_curr} (Billions)"),
                                 color=alt.Color(
                                     "Metric:N",
                                     scale=alt.Scale(domain=["Revenue", "Net Income"], range=["#1E40AF", "#10B981"]),

@@ -50,13 +50,19 @@ def _safe_float(val: Any) -> Optional[float]:
         return None
 
 
-def extract_chart_data(ticker_obj: Any, info: Dict[str, Any], currency: str = "USD") -> Dict[str, Any]:
+def extract_chart_data(
+    ticker_obj: Any,
+    info: Dict[str, Any],
+    currency: str = "USD",
+    reporting_currency: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Safely extract JSON-serializable chart datasets from a yfinance Ticker object and info dict.
     Never raises; returns partial datasets cleanly if any individual feed is unavailable.
     """
     chart_data: Dict[str, Any] = {
         "currency": currency or "USD",
+        "reporting_currency": reporting_currency or currency or "USD",
         "price_history": [],
         "price_summary": {},
         "annual_financials": [],

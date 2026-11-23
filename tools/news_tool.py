@@ -195,6 +195,9 @@ def is_relevant_article(
     trade_lower = (resolved_entity.get("trade_name") or clean_name).lower().strip() if resolved_entity else clean_name_lower
     canonical_lower = (resolved_entity.get("canonical_name") or clean_name).lower().strip() if resolved_entity else clean_name_lower
     anchors_lower = [a.lower().strip() for a in (resolved_entity.get("required_search_anchors") or []) if a and a.strip().lower() != trade_lower] if resolved_entity else []
+    generic_ticker = clean_sym in {"tm", "ge", "gm", "t", "c", "dd", "f", "m", "p"}
+    if generic_ticker:
+        clean_sym = ""
 
     # 1. Hard negative-keyword exclusion (supports both single words and multi-word phrases)
     if resolved_entity:

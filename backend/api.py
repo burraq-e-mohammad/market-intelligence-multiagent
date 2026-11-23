@@ -22,12 +22,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import json
-import base64
 import queue
 import threading
 import time
 from agents.supervisor import ResearchSupervisor
 import config
+from fastapi.responses import Response
+
+_pdf_cache: Dict[str, bytes] = {}
 
 app = FastAPI(
     title="Autonomous Market Intelligence Multi-Agent API",
@@ -136,20 +138,18 @@ def conduct_research_stream(request: ResearchRequest):
                 except TypeError:
                     results = supervisor.run_investigation(target)
 
-                # Prepare JSON-safe payload (convert raw pdf_bytes to base64 and omit internal raw tool dump)
                 raw_dossier = dict(results.get("dossier") or {})
                 if isinstance(raw_dossier.get("shared_state"), dict):
                     raw_dossier["shared_state"] = {
                         k: v for k, v in raw_dossier["shared_state"].items() if k != "bio_tool_result"
                     }
                 pdf_raw = results.get("pdf_bytes")
-                pdf_b64 = base64.b64encode(pdf_raw).decode("ascii") if isinstance(pdf_raw, (bytes, bytearray)) else None
-
                 safe_results = {
                     "dossier": raw_dossier,
-                    "pdf_b64": pdf_b64,
                     "execution_time": results.get("execution_time")
                 }
+                if isinstance(pdf_raw, (bytes, bytearray)):
+                    _pdf_cache[target.lower()] = bytes(pdf_raw)
                 event_queue.put({"type": "done", "results": safe_results})
             except Exception as exc:
                 event_queue.put({"type": "error", "error": str(exc)})
@@ -186,6 +186,13 @@ def download_pdf(target: str):
     clean = target.strip()
     if not clean:
         raise HTTPException(status_code=400, detail="Target company name or ticker required.")
+    cached = _pdf_cache.get(clean.lower())
+    if cached:
+        return Response(
+            content=cached,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={clean}_dossier.pdf"}
+        )
     results = supervisor.run_investigation(clean)
     pdf_bytes = results.get("pdf_bytes")
     from fastapi.responses import Response

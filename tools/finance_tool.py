@@ -319,7 +319,9 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
 
             current_price = info.get("currentPrice") or info.get("regularMarketPrice") or current_price
             market_cap = info.get("marketCap") or market_cap
-            currency = info.get("currency") or currency
+            quote_currency = info.get("currency") or currency
+            reporting_currency = info.get("financialCurrency") or quote_currency
+            currency = quote_currency
             fifty_two_week_high = info.get("fiftyTwoWeekHigh") or fifty_two_week_high
             fifty_two_week_low = info.get("fiftyTwoWeekLow") or fifty_two_week_low
             exchange = info.get("exchange") or exchange
@@ -419,7 +421,12 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             chart_data = {}
             try:
                 from tools.chart_tool import extract_chart_data
-                chart_data = extract_chart_data(ticker, info, currency=currency)
+                chart_data = extract_chart_data(
+                    ticker,
+                    info,
+                    currency=quote_currency,
+                    reporting_currency=reporting_currency
+                )
             except Exception:
                 chart_data = {}
 
@@ -461,7 +468,9 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                     "enterprise_to_ebitda": f"{enterprise_to_ebitda:.2f}" if enterprise_to_ebitda else "N/A",
                     "52_week_high": f"{fifty_two_week_high:,.2f} {currency}" if fifty_two_week_high else "N/A",
                     "52_week_low": f"{fifty_two_week_low:,.2f} {currency}" if fifty_two_week_low else "N/A",
-                    "total_revenue": format_number(total_revenue, currency=currency),
+                    "total_revenue": format_number(total_revenue, currency=reporting_currency),
+                    "reporting_currency": reporting_currency,
+                    "quote_currency": quote_currency,
                     "revenue_scale_descriptor": get_revenue_scale_descriptor(total_revenue),
                     "peg_rationale": get_peg_rationale(peg_ratio, forward_pe),
                     "gross_margins": gross_pct,
