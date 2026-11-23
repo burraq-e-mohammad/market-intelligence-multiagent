@@ -141,9 +141,9 @@ Do NOT output disclaimers or apologies. Write an authoritative, professional cor
                     )
 
                 sec3_moat = (
-                    f"{company_name}'s competitive moat is anchored in proprietary technology architecture, deep client retention, "
-                    f"and established ecosystem partnerships. By continuously co-designing hardware, software, and specialized domain capabilities, "
-                    f"the organization maintains durable barriers to entry against broader market competitors."
+                    f"{company_name}'s competitive moat cannot be characterized beyond explicitly documented source facts. "
+                    f"Verified public filings, products, intellectual property, customer relationships, and ecosystem partnerships "
+                    f"should be cited individually rather than replaced with generic market leadership claims."
                 )
 
                 llm_analysis = (

@@ -36,6 +36,24 @@ class QualityAssuranceAgent:
             if field in dossier and isinstance(dossier[field], str):
                 dossier[field] = self._sanitize_section(dossier[field], field, shared_state)
 
+        for field in text_fields:
+            val = dossier.get(field, "")
+            if not isinstance(val, str):
+                continue
+            val = re.sub(
+                r'\b(?:board(?:’s|s)?\s+unanimous\s+vote|unanimously\s+(?:reinstat\w*|reappoint\w*|vot\w*)|political\s+endorsement|former\s+president\s+.*(?:U-turn|u-turn)|Trump\s+U-turn|(?:reinstat\w*|reappoint\w*)\s+Jensen\s+Huang)\b[^.?!]*[.?!]?',
+                'The source headline alone is reported; it does not verify an executive or board action.',
+                val,
+                flags=re.IGNORECASE
+            )
+            val = re.sub(
+                r'\b(?:unanimous\s+board\s+vote|board\s+reinstates?|political\s+endorsement|Trump\s+U-turn|DC\s+U-turn)\b',
+                'reported headline claim',
+                val,
+                flags=re.IGNORECASE
+            )
+            dossier[field] = val
+
         # 2. Reconcile stock price conflicts (pre-split vs current adjusted quote)
         # Strictly scoped to explicit share-price contexts; NEVER triggers on revenue, market cap, or valuation ($797.46B, $852 billion, etc.)!
         if canonical_price and canonical_price != "N/A":

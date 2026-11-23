@@ -109,6 +109,8 @@ VERIFIED NEWS HEADLINES & MEDIA STREAM:
 {headlines_text}
 
 CRITICAL CONSISTENCY & FACTUAL DIRECTIVES:
+1. SOURCE-ONLY RULE: Do not infer causes, votes, executive reinstatement, political endorsements, or 28% price moves unless the headline or snippet explicitly states them. If a detail is not in the supplied source, omit it.
+2. CONFIRM SOURCE LIMIT: A headline may be sensational or speculative. Treat it only as a reported claim, with the publisher and date. Do not convert a headline into a confirmed corporate action or market outcome.
 1. PRICE & EXTENDED HOURS: Never cite a historical pre-split share price as current. Regular-session price is {market_price}. If Extended-Hours Trading Context or post-earnings headlines report an after-hours/pre-market move, explicitly cite that extended-hours context alongside the regular close.
 2. CONCRETE ACTUALS, NUMERICAL ATTRIBUTION & CROSS-BORDER CURRENCY CLARITY: Whenever headlines/snippets contain concrete reported earnings numbers (quarterly revenue, EPS, beat, guidance) or investment figures, cite those exact numbers faithfully. NEVER conflate or double-count dollar amounts across separate geographies or sub-projects. If a translated/regional headline quotes a foreign partner's or competitor's revenue in local currency (e.g. a US firm's revenue converted to KRW/JPY trillions by regional press), explicitly note that it is a local-currency equivalent (or cite their native USD figure) rather than implying a foreign company reports natively in local currency.
 3. FISCAL QUARTER ACCURACY: Strictly label any recent earnings release according to the Fiscal Calendar Grounding above ({recent_q if recent_q else 'exact fiscal quarter'}). NEVER confuse calendar quarters with non-calendar fiscal quarters!

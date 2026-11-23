@@ -305,7 +305,7 @@ def generate_executive_memo(dossier: Dict[str, Any]) -> Dict[str, Any]:
         ]
         cons = [
             f"Valuation multiples (P/E of {metrics.get('trailing_pe', metrics.get('pe_ratio', 'N/A'))}) price in strong multi-year compounding with limited room for execution misses.",
-            "Macro exposure to enterprise IT budget cycles, inflation-adjusted cost of capital, and geopolitical supply chain dynamics.",
+            "Demand cyclicality, supply-chain execution, and geopolitical export-control exposure.",
             "Evolving regulatory scrutiny, cross-border trade controls, and aggressive competition from top-tier international incumbents."
         ]
     elif entity_type == "SUBSIDIARY":
