@@ -150,7 +150,15 @@ def conduct_research_stream(request: ResearchRequest):
                     "execution_time": results.get("execution_time")
                 }
                 if isinstance(pdf_raw, (bytes, bytearray)):
-                    _pdf_cache[_normalize_pdf_cache_key(target)] = bytes(pdf_raw)
+                    pdf_bytes = bytes(pdf_raw)
+                    cache_keys = {
+                        _normalize_pdf_cache_key(target),
+                        _normalize_pdf_cache_key(raw_dossier.get("ticker")),
+                        _normalize_pdf_cache_key(raw_dossier.get("company_name")),
+                    }
+                    for cache_key in cache_keys:
+                        if cache_key:
+                            _pdf_cache[cache_key] = pdf_bytes
                 event_queue.put({"type": "done", "results": safe_results})
             except Exception as exc:
                 event_queue.put({"type": "error", "error": str(exc)})
