@@ -75,6 +75,7 @@ CRITICAL UNIVERSAL DIRECTIVES:
    - Align divisions strictly with the exact target entity's ({company_name}) verified products and reporting segments above or explicitly named in the Source Dossier / Live Business Description.
    - STRICT ANTI-HALLUCINATION RULE: NEVER default to generic IT/software consulting pillars (such as 'Enterprise Product Engineering', 'Cloud Infrastructure', or 'Digital Modernization') for non-IT enterprises (e.g. Testing/Inspection/Certification, Industrials, Manufacturing, Consumer, or Healthcare companies), even if a market feed tags the industry as 'Consulting Services'. If explicit divisions are absent from the source dossier, state 'Segment breakdown not retrieved from public filings' rather than inventing divisions.
    - If the company belongs to a wider conglomerate/chaebol, NEVER list separately listed sister affiliates (e.g., separate insurance, shipbuilding, or biopharma affiliates) as internal operating divisions of {company_name}.
+   - For subsidiaries, do not infer standalone legal structure, ownership, headquarters, leadership, or financial KPIs unless those facts appear in the SOURCE DOSSIER or live verified profile.
 3. Section 3 (Competitive Moat & Strategic Industry Positioning):
    - Analyze architectural moats, proprietary ecosystems, intellectual property, and customer retention dynamics.
    - Do not invent patents, plant counts, output volumes, market-share, capacity, or future targets unless the exact fact appears in the SOURCE DOSSIER or LIVE BUSINESS DESCRIPTION.

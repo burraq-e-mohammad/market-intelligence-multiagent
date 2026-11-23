@@ -148,6 +148,12 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         )
 
         pre_profile = tool_bio.get("entity_profile", {})
+        if pre_profile.get("headquarters"):
+            resolved_dict = resolved.model_dump()
+            resolved_dict["headquarters"] = pre_profile["headquarters"]
+            resolved = ResolvedEntity(**resolved_dict)
+        else:
+            resolved_dict = resolved.model_dump()
         pre_breaking_gov = pre_profile.get("breaking_governance", [])
         pre_breaking_reg = pre_profile.get("breaking_regulatory", [])
 
@@ -478,29 +484,29 @@ STRATEGIC_OUTLOOK:
                 )
             elif entity_type == "SUBSIDIARY":
                 sub_kpis = resolved_dict.get("subsidiary_kpis") or {}
-                parent_co = resolved_dict.get("parent_company") or "Parent Group"
-                ownership = resolved_dict.get("ownership_pct") or f"Wholly-owned subsidiary of {parent_co}"
-                currency = resolved_dict.get("local_currency") or "Local Currency"
+                parent_co = resolved_dict.get("parent_company") or "Not verified"
+                ownership = resolved_dict.get("ownership_pct") or "Ownership structure not verified"
+                currency = resolved_dict.get("local_currency") or "Not disclosed"
                 clean_reg_join = "; ".join(r.rstrip(". ") for r in breaking_reg)
                 reg_str = f"\n\n### Regulatory, Spectrum & Macroeconomic Risks\nKey regulatory and operating risks include: {clean_reg_join}." if breaking_reg else (
-                    f"\n\n### Key Operational & Macroeconomic Risks\nPrimary risks include {currency} exchange-rate volatility against parent reporting currency, spectrum renewal capex, power/tower energy costs, and evolving local telecom regulations."
+                    f"\n\n### Key Operational & Macroeconomic Risks\nDo not invent subsidiary-specific risks. State only risks supported by the Verified State or live source findings."
                 )
 
                 exec_summary = (
                     f"### Subsidiary Standing & Parent Ownership\n"
-                    f"{company_name} (legally {resolved_dict.get('legal_entity_name')}) operates in {resolved_dict.get('headquarters')} as a {ownership}. "
-                    f"Active in {resolved_dict.get('sector')}, the operator combines nationwide telecom infrastructure with high-growth digital and fintech platforms.\n\n"
+                    f"{company_name} (legal entity: {resolved_dict.get('legal_entity_name') or 'Not verified'}) has headquarters status of {resolved_dict.get('headquarters') or 'Not verified'} and ownership status of {ownership}. "
+                    f"Verified sector: {resolved_dict.get('sector') or 'Not verified'}.\n\n"
                     f"### Consolidated Financial Scale & Operational KPIs ({currency})\n"
                     f"Financials are reported under {sub_kpis.get('reporting_basis', parent_co)}. "
                     f"Documented local-currency figures show Revenue of {sub_kpis.get('annual_revenue', f'Undisclosed standalone (Consolidated under {parent_co})')} and EBITDA of {sub_kpis.get('ebitda', f'Undisclosed standalone (Consolidated under {parent_co})')}. "
-                    f"Commercial leadership is underpinned by {sub_kpis.get('subscribers', 'strong regional subscriber scale')} alongside {sub_kpis.get('digital_ecosystem', 'expanding digital services')}.\n\n"
+                    f"Documented subscriber scale: {sub_kpis.get('subscribers', 'Not disclosed')}. Digital/platform details: {sub_kpis.get('digital_ecosystem', 'Not disclosed')}.\n\n"
                     f"### Market Sentiment & Strategic Positioning\n"
                     f"Current media and market sentiment is {sentiment_tone.lower()}. Credit and capital backing remain anchored by {sub_kpis.get('credit_rating', parent_co)}."
                 )
-                growth_segments = f"across {', '.join(verified_segments)}" if verified_segments else "through 4G/5G broadband expansion and digital financial services"
+                growth_segments = f"across {', '.join(verified_segments)}" if verified_segments else "only as supported by verified public disclosures"
                 strategic_outlook = (
                     f"### Strategic Growth Vectors\n"
-                    f"{company_name}'s forward trajectory centers on scaling ARPU, monetizing high-speed mobile data, and expanding digital ecosystem services {growth_segments}.{reg_str}"
+                    f"{company_name}'s forward trajectory must be limited to verified operating disclosures {growth_segments}.{reg_str}"
                 )
             else:
                 exec_summary = (

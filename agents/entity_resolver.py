@@ -129,14 +129,32 @@ negative_keywords (list of 5-8 unrelated collision terms)."""
             if match:
                 parsed = json.loads(match.group(0))
                 if parsed.get("canonical_name") and parsed.get("entity_type") in ("PUBLIC", "PRIVATE", "SUBSIDIARY"):
-                    return ResolvedEntity(**parsed)
+                    entity = parsed
+                    if entity.get("entity_type") == "SUBSIDIARY":
+                        entity["canonical_name"] = raw
+                        entity["trade_name"] = raw
+                        entity["legal_entity_name"] = "Not verified"
+                        entity["parent_company"] = "Not verified"
+                        entity["parent_ticker"] = None
+                        entity["ticker"] = None
+                        entity["headquarters"] = "Not verified"
+                        entity["ownership_pct"] = "Ownership structure not verified"
+                        entity["subsidiary_kpis"] = entity.get("subsidiary_kpis") or {
+                            "reporting_basis": "Not disclosed",
+                            "annual_revenue": "Not disclosed",
+                            "ebitda": "Not disclosed",
+                            "subscribers": "Not disclosed",
+                            "digital_ecosystem": "Not disclosed",
+                            "credit_rating": "Not verified"
+                        }
+                    return ResolvedEntity(**entity)
         except Exception:
             pass
 
         return ResolvedEntity(
             canonical_name=raw,
             trade_name=raw,
-            legal_entity_name=raw,
+            legal_entity_name="Not verified",
             entity_type="PRIVATE",
             ticker=None,
             sector=industry_hint or "Undetermined",

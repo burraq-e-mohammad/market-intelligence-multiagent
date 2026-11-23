@@ -125,11 +125,11 @@ Critique TTM revenue scale ({rev_val}), profit margins ({metrics.get('profit_mar
                 )
         elif entity_type == "SUBSIDIARY":
             kpis = resolved_entity.get("subsidiary_kpis") or {}
-            parent_co = resolved_entity.get("parent_company") or "Parent Holding Group"
-            ownership = resolved_entity.get("ownership_pct") or f"Wholly-owned subsidiary of {parent_co}"
-            legal_name = resolved_entity.get("legal_entity_name") or metrics.get("company_name")
-            currency = resolved_entity.get("local_currency") or "Local Currency"
-            hq = resolved_entity.get("headquarters") or "Regional Market"
+            parent_co = resolved_entity.get("parent_company") or "Not verified"
+            ownership = resolved_entity.get("ownership_pct") or "Ownership structure not verified"
+            legal_name = resolved_entity.get("legal_entity_name") or "Not verified"
+            currency = resolved_entity.get("local_currency") or "Not disclosed"
+            hq = resolved_entity.get("headquarters") or "Not verified"
             parent_mkt = metrics.get("parent_metrics") or {}
             parent_quote = (
                 f"{parent_mkt.get('symbol')} @ {parent_mkt.get('current_price')} (Market Cap: {parent_mkt.get('market_cap')})"
@@ -166,12 +166,12 @@ Provide an in-depth 3-section evaluation:
             if "Report]" in llm_analysis:
                 llm_analysis = (
                     f"### 1. Parent-Subsidiary Ownership & Consolidated Capital Architecture\n"
-                    f"{resolved_entity.get('canonical_name')} (legally {legal_name}) operates as a {ownership}, headquartered in {hq}. "
-                    f"Rather than maintaining a standalone stock exchange listing or relying on venture funding, the subsidiary's balance sheet, spectrum financing, and network capex are supported through {parent_co} ({parent_quote}).\n\n"
+                    f"{resolved_entity.get('canonical_name')} (legal entity: {legal_name}) has ownership status {ownership}, headquarters status {hq}. "
+                    f"The subsidiary may be supported through {parent_co} ({parent_quote}) only as reflected by parent or regulatory disclosures.\n\n"
                     f"### 2. Local-Currency Operating Scale, Revenue/EBITDA & Subscriber KPIs\n"
                     f"Operating in {currency}, documented disclosures reflect: Revenue — {kpis.get('annual_revenue', f'Undisclosed standalone (Consolidated under {parent_co})')}; "
                     f"EBITDA — {kpis.get('ebitda', f'Undisclosed standalone (Consolidated under {parent_co})')}. "
-                    f"Commercial scale is anchored by {kpis.get('subscribers', 'strong regional market share')} and digital ecosystem expansion spanning {kpis.get('digital_ecosystem', 'core digital services')}.\n\n"
+                    f"Subscriber data: {kpis.get('subscribers', 'Not disclosed')}. Digital ecosystem: {kpis.get('digital_ecosystem', 'Not disclosed')}.\n\n"
                     f"### 3. Capital Intensity, Credit Standing & FX / Regulatory Dynamics\n"
                     f"Credit standing is anchored by {kpis.get('credit_rating', f'parent backing from {parent_co}')}. "
                     f"Key financial sensitivities include {currency} foreign-exchange translation into parent reporting currency, spectrum renewal capex, energy/tower operating costs, and local regulatory taxation."

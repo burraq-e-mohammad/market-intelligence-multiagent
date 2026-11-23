@@ -336,8 +336,8 @@ def generate_pdf_report(
         pdf.multi_cell(0, 5, sanitize_text(f"Status: Publicly Traded | Sector: {metrics.get('sector', 'N/A')} | Industry: {metrics.get('industry', 'N/A')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     elif entity_type == "SUBSIDIARY":
         parent_co = resolved_entity.get("parent_company") or metrics.get("parent_company") or "Parent Holding Group"
-        hq = resolved_entity.get("headquarters") or metrics.get("headquarters") or "Regional Market"
-        sector = resolved_entity.get("sector") or metrics.get("sector") or "Telecommunications & Services"
+        hq = resolved_entity.get("headquarters") or metrics.get("headquarters") or "Not verified"
+        sector = resolved_entity.get("sector") or metrics.get("sector") or "Not verified"
         pdf.multi_cell(0, 5, sanitize_text(f"Status: Wholly-Owned Operating Subsidiary | Parent: {parent_co} | HQ: {hq} | Sector: {sector}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     else:
         pdf.multi_cell(0, 5, sanitize_text("Status: Privately Held / Non-Public Enterprise | Unlisted Equity"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)

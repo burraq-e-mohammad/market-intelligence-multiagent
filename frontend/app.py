@@ -583,7 +583,7 @@ if active_research and active_research.get("dossier"):
             st.caption(f"Exchange: **{metrics.get('exchange', 'N/A')}** | Sector: **{metrics.get('sector', 'N/A')}** | Industry: **{metrics.get('industry', 'N/A')}**")
         elif entity_type == "SUBSIDIARY":
             parent_co = resolved_entity.get("parent_company") or metrics.get("parent_company") or "Parent Holding Group"
-            hq = resolved_entity.get("headquarters") or "Regional Market"
+            hq = resolved_entity.get("headquarters") or "Not verified"
             st.markdown(f"## {company_name} <span class='badge-private'>WHOLLY-OWNED SUBSIDIARY</span> {time_badge}", unsafe_allow_html=True)
             st.caption(f"Parent Ownership: **{parent_co}** | HQ: **{hq}** | Sector: **{resolved_entity.get('sector', 'Telecom & Digital')}**")
         else:

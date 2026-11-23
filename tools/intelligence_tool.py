@@ -310,20 +310,23 @@ def generate_executive_memo(dossier: Dict[str, Any]) -> Dict[str, Any]:
         ]
     elif entity_type == "SUBSIDIARY":
         resolved = dossier.get("resolved_entity") or {}
-        parent_co = resolved.get("parent_company") or "Parent Group"
+        parent_co = resolved.get("parent_company") or "Not verified"
+        hq = resolved.get("headquarters") or "Not verified"
+        legal_name = resolved.get("legal_entity_name") or "Not verified"
         takeaway = (
-            f"{company_name} operates as a wholly-owned operating subsidiary backed by {parent_co}. "
-            f"It pairs significant local subscriber and infrastructure scale with parent group capitalization and credit backing."
+            f"{company_name} is classified as a subsidiary of {parent_co}. "
+            f"Legal entity: {legal_name}. Headquarters: {hq}. "
+            f"Standalone financial and subscriber data are not assumed and remain source-dependent."
         )
         pros = [
-            f"Strategic backing, balance sheet credit guarantees, and technology sharing from parent company {parent_co}.",
-            "Dominant regional subscriber footprint with deep network distribution and digital financial services integration.",
-            "High defensive recurring utility revenue with mission-critical consumer and enterprise lock-in."
+            f"Parent ownership reference: {parent_co}, subject to filing verification.",
+            "Potential access to shared infrastructure, technology, and consolidated parent resources.",
+            "Operating footprint and digital ecosystem value remain positive only when documented by public sources."
         ]
         cons = [
-            "Local currency volatility against parent foreign-exchange reporting currency affecting dollar-denominated returns.",
-            "Capital-intensive infrastructure upgrade requirements (spectrum licensing, tower electrification, 4G/5G expansion).",
-            "Stringent local telecom regulatory compliance and price-cap scrutiny from national authorities."
+            "Standalone revenue, EBITDA, debt, and credit capacity may not be publicly disclosed.",
+            "Subsidiary-specific risks cannot be inferred from parent-level financials without source evidence.",
+            "Ownership, headquarters, and regulatory structure require source verification."
         ]
     else:
         # Private enterprise (e.g. Motive, OpenAI)
