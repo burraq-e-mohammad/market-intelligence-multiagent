@@ -126,7 +126,7 @@ def classify_role_category(title: str) -> Literal[
 
 
 def parse_officer_string(raw: str, source: str = "Verified Source", priority: int = 2) -> Optional[VerifiedOfficer]:
-    """Parse strings like 'Colette Kress (Interim CEO & CFO)' into a validated VerifiedOfficer."""
+    """Parse strings like 'Person Name (Interim CEO & CFO)' into a verified officer."""
     m = re.match(r'^([^\(]+?)\s*\(([^\)]+)\)\s*$', raw.strip())
     if not m:
         return None

@@ -288,7 +288,7 @@ def fetch_wikipedia_infobox_officers(page_title: str) -> List[VerifiedOfficer]:
             line = raw_line.strip(" *•-\t")
             if not line or len(line) < 5:
                 continue
-            # Typical Infobox format: "Colette Kress (interim CEO and CFO)" or "Satya Nadella (chairman and CEO)"
+            # Infobox format: "Person Name (chairman and CEO)".
             pm = re.match(r'^([A-Z][A-Za-z\.\-\s]{2,45}?)\s*\(([^\)]{2,80})\)', line)
             if pm:
                 cand_name, cand_title = pm.group(1).strip(), pm.group(2).strip()
