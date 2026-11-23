@@ -321,6 +321,14 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
     - Major historical M&A / acquisitions with closing dates and deal values
     """
     text = f"{summary}\n\n{body}"
+    headquarters = ""
+    hq_match = re.search(
+        r'\b(?:headquartered in|headquarters (?:are|is)?\s*(?:in|at)?|headquarters:)\s*([A-Z][A-Za-z\s,\-]{3,100}?)(?:\.|;|\n)',
+        text,
+        re.IGNORECASE
+    )
+    if hq_match:
+        headquarters = re.sub(r"\s+", " ", hq_match.group(1)).strip(" ,;.")
     
     # 1. Extract Founders & Origins (lead summary preferred)
     founding_matches = re.findall(r'(?:founded|established)\s+(?:in|on)\s+([0-9]{4})(?:\s+by\s+([^,\.\n]+(?:,\s*[^,\.\n]+)*))?', summary or text, re.IGNORECASE)
@@ -403,6 +411,7 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
 
     return {
         "founding_info": founding_info,
+        "headquarters": headquarters,
         "active_officers": [o.model_dump() for o in reconciled_officers],
         "verified_leadership": leadership[:6],
         "verified_acquisitions": acquisitions[:6],
