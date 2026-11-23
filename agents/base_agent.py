@@ -1,4 +1,5 @@
 from typing import Optional, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import config
 
 class BaseAgent:
@@ -16,10 +17,21 @@ class BaseAgent:
         4. Intelligent Heuristic Synthesizer
         """
         cfg = config.get_config()
+        full_prompt = f"{self.system_prompt}\n\nTask Instructions:\n{user_prompt}"
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self._generate_provider_response, cfg, full_prompt)
+        try:
+            return future.result(timeout=18)
+        except FuturesTimeoutError:
+            future.cancel()
+            return self._heuristic_fallback(full_prompt)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    def _generate_provider_response(self, cfg: Dict[str, Any], full_prompt: str) -> str:
         provider = cfg["PROVIDER"]
         gemini_key = cfg["GEMINI_API_KEY"]
         groq_key = cfg["GROQ_API_KEY"]
-        full_prompt = f"{self.system_prompt}\n\nTask Instructions:\n{user_prompt}"
 
         # 1. Try Gemini with lightweight/fast model and failover candidates
         if (provider == "gemini" or not provider or provider != "mock") and gemini_key:
@@ -58,7 +70,7 @@ class BaseAgent:
                             model=q_model,
                             messages=[
                                 {"role": "system", "content": self.system_prompt},
-                                {"role": "user", "content": user_prompt}
+                                {"role": "user", "content": full_prompt}
                             ],
                             temperature=0.3
                         )
@@ -70,7 +82,7 @@ class BaseAgent:
                 pass
 
         # 3. Intelligent Heuristic Fallback
-        return self._heuristic_fallback(user_prompt)
+        return self._heuristic_fallback(full_prompt)
 
     def _heuristic_fallback(self, prompt: str) -> str:
         """

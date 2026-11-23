@@ -305,9 +305,16 @@ if execute_btn or preset:
             with st.expander(f"Execution log ({len(rows)} events) — {elapsed_s:.1f}s elapsed", expanded=True):
                 if not rows:
                     st.caption("Waiting for the first agent event...")
+                log_lines = []
                 for log in rows[-30:]:
                     icon = "✅" if log["status"] in ("completed", "complete") else "⚙️"
-                    st.caption(f"{icon} [{log['elapsed']:.1f}s] {log['agent']} — {log['message']} ")
+                    log_lines.append(f"{icon} [{log['elapsed']:.1f}s] {log['agent']} — {log['message']}")
+                st.markdown(
+                    "<div style='max-height:360px;overflow-y:auto;font-size:.82rem;color:#475569;'>" +
+                    "<br>".join(log_lines) +
+                    "</div>",
+                    unsafe_allow_html=True
+                )
 
     def infer_progress_and_cap(evt):
         explicit_pct = evt.get("progress")
@@ -387,170 +394,171 @@ if execute_btn or preset:
 
     render_progress(tracker["pct"], tracker["agent"], tracker["message"], 0.0, state="running")
 
-    with st.status(f"🚀 Multi-Agent Team Investigating: '{query_target}' — {tracker['pct']}%", expanded=True) as status:
-        dossier = None
-        pdf_bytes = None
-        execution_time = None
-        error_message = None
+    dossier = None
+    pdf_bytes = None
+    execution_time = None
+    error_message = None
 
-        def handle_progress_event(evt):
-            t = evt.get("time", round(time.time() - run_start_ts, 1))
-            agent = evt.get("agent", "")
-            msg = evt.get("message", "")
-            pct, cap = infer_progress_and_cap(evt)
-            tracker["pct"] = pct
-            tracker["cap"] = cap
-            tracker["agent"] = agent or tracker["agent"]
-            tracker["message"] = msg or tracker["message"]
-            render_progress(pct, tracker["agent"], tracker["message"], float(t), state="running")
+    def handle_progress_event(evt):
+        t = evt.get("time", round(time.time() - run_start_ts, 1))
+        agent = evt.get("agent", "")
+        msg = evt.get("message", "")
+        pct, cap = infer_progress_and_cap(evt)
+        tracker["pct"] = pct
+        tracker["cap"] = cap
+        tracker["agent"] = agent or tracker["agent"]
+        tracker["message"] = msg or tracker["message"]
+        render_progress(pct, tracker["agent"], tracker["message"], float(t), state="running")
+        event_key = (
+            round(float(t), 1),
+            agent or "Multi-Agent System",
+            msg or "Processing...",
+            str(evt.get("status") or "running")
+        )
+        existing_keys = {
+            (
+                round(float(log["elapsed"]), 1),
+                log["agent"],
+                log["message"],
+                log["status"]
+            )
+            for log in st.session_state["execution_logs"]
+        }
+        if event_key not in existing_keys:
             st.session_state["execution_logs"].append({
-                "elapsed": float(t),
-                "agent": agent or "Multi-Agent System",
-                "message": msg or "Processing...",
-                "status": str(evt.get("status") or "running")
+            "elapsed": float(t),
+            "agent": agent or "Multi-Agent System",
+            "message": msg or "Processing...",
+            "status": str(evt.get("status") or "running")
             })
-            render_execution_log(float(t))
-            status.update(label=f"🚀 Multi-Agent Team Investigating: '{query_target}' — {pct}% ({float(t):.1f}s)")
-            status.write(f"⏱️ **[{float(t):.1f}s]** `[{pct}%]` `{agent}`: {msg}")
+        render_execution_log(float(t))
 
-        def handle_heartbeat(elapsed_s):
-            if tracker["pct"] < tracker["cap"]:
-                tracker["pct"] += 1
-            render_progress(tracker["pct"], tracker["agent"], tracker["message"], float(elapsed_s), state="running")
-            render_execution_log(float(elapsed_s))
-            status.update(label=f"🚀 Multi-Agent Team Investigating: '{query_target}' — {tracker['pct']}% ({float(elapsed_s):.1f}s)")
+    def handle_heartbeat(elapsed_s):
+        if tracker["pct"] < tracker["cap"]:
+            tracker["pct"] += 1
+        render_progress(tracker["pct"], tracker["agent"], tracker["message"], float(elapsed_s), state="running")
+        render_execution_log(float(elapsed_s))
 
-        # 1. Attempt Streaming Call to FastAPI Backend
-        if backend_online:
+    if backend_online:
+        try:
+            with requests.post(
+                f"{API_BASE_URL}/api/research/stream",
+                json={"target": query_target},
+                stream=True,
+                timeout=300
+            ) as response:
+                if response.status_code == 200:
+                    for line in response.iter_lines(chunk_size=1):
+                        if line:
+                            item = json.loads(line.decode("utf-8"))
+                            item_type = item.get("type")
+                            if item_type == "progress":
+                                handle_progress_event(item["event"])
+                            elif item_type == "heartbeat":
+                                handle_heartbeat(item.get("elapsed", round(time.time() - run_start_ts, 1)))
+                            elif item_type == "done":
+                                results = item.get("results", {})
+                                dossier = results.get("dossier")
+                                pdf_b64 = results.get("pdf_b64")
+                                if pdf_b64:
+                                    import base64
+                                    pdf_bytes = base64.b64decode(pdf_b64)
+                                else:
+                                    pdf_bytes = results.get("pdf_bytes")
+                                execution_time = results.get("execution_time")
+                            elif item_type == "error":
+                                error_message = item.get("error")
+                elif response.status_code == 404:
+                    error_message = "The backend is missing streaming support. Restart the FastAPI server."
+        except Exception as exc:
+            error_message = f"Streaming request failed: {exc}"
+
+    if not dossier:
+        import importlib
+        import tools.schemas
+        import tools.chart_tool
+        import tools.wiki_tool
+        import tools.news_tool
+        import tools.finance_tool
+        import tools.pdf_tool
+        import agents.entity_resolver
+        import agents.biography_agent
+        import agents.financial_agent
+        import agents.news_agent
+        import agents.qa_validator_agent
+        import agents.supervisor
+
+        importlib.reload(tools.schemas)
+        importlib.reload(tools.chart_tool)
+        importlib.reload(tools.wiki_tool)
+        importlib.reload(tools.news_tool)
+        importlib.reload(tools.finance_tool)
+        importlib.reload(tools.pdf_tool)
+        importlib.reload(agents.entity_resolver)
+        importlib.reload(agents.biography_agent)
+        importlib.reload(agents.financial_agent)
+        importlib.reload(agents.news_agent)
+        importlib.reload(agents.qa_validator_agent)
+        importlib.reload(agents.supervisor)
+
+        from agents.supervisor import ResearchSupervisor
+        supervisor = ResearchSupervisor()
+        local_queue = queue.Queue()
+
+        def on_progress(evt):
+            local_queue.put({"type": "progress", "event": evt})
+
+        def run_local_worker():
             try:
-                with requests.post(
-                    f"{API_BASE_URL}/api/research/stream",
-                    json={"target": query_target},
-                    stream=True,
-                    timeout=300
-                ) as response:
-                    if response.status_code == 200:
-                        for line in response.iter_lines(chunk_size=1):
-                            if line:
-                                item = json.loads(line.decode("utf-8"))
-                                item_type = item.get("type")
-                                if item_type == "progress":
-                                    handle_progress_event(item["event"])
-                                elif item_type == "heartbeat":
-                                    handle_heartbeat(item.get("elapsed", round(time.time() - run_start_ts, 1)))
-                                elif item_type == "done":
-                                    results = item.get("results", {})
-                                    dossier = results.get("dossier")
-                                    pdf_b64 = results.get("pdf_b64")
-                                    if pdf_b64:
-                                        import base64
-                                        pdf_bytes = base64.b64decode(pdf_b64)
-                                    else:
-                                        pdf_bytes = results.get("pdf_bytes")
-                                    execution_time = results.get("execution_time")
-                                elif item_type == "error":
-                                    error_message = item.get("error")
-                                    status.write(f"⚠️ Worker notice: {error_message}")
-                    elif response.status_code == 404:
-                        status.write("⚠️ Older FastAPI server detected on port 8000 (missing `/api/research/stream`). Restart backend to enable API streaming; continuing in Direct Mode...")
-            except Exception:
-                pass
+                res = supervisor.run_investigation(query_target, progress_callback=on_progress)
+                local_queue.put({"type": "done", "results": res})
+            except Exception as exc:
+                local_queue.put({"type": "error", "error": str(exc)})
+            finally:
+                local_queue.put(None)
 
-        # 2. Fallback: Direct Agent Execution with live queue & heartbeat ticks
-        if not dossier:
-            import importlib
-            import tools.schemas
-            import tools.chart_tool
-            import tools.wiki_tool
-            import tools.news_tool
-            import tools.finance_tool
-            import tools.pdf_tool
-            import agents.entity_resolver
-            import agents.biography_agent
-            import agents.financial_agent
-            import agents.news_agent
-            import agents.qa_validator_agent
-            import agents.supervisor
+        worker = threading.Thread(target=run_local_worker, daemon=True)
+        worker.start()
 
-            importlib.reload(tools.schemas)
-            importlib.reload(tools.chart_tool)
-            importlib.reload(tools.wiki_tool)
-            importlib.reload(tools.news_tool)
-            importlib.reload(tools.finance_tool)
-            importlib.reload(tools.pdf_tool)
-            importlib.reload(agents.entity_resolver)
-            importlib.reload(agents.biography_agent)
-            importlib.reload(agents.financial_agent)
-            importlib.reload(agents.news_agent)
-            importlib.reload(agents.qa_validator_agent)
-            importlib.reload(agents.supervisor)
-
-            from agents.supervisor import ResearchSupervisor
-            supervisor = ResearchSupervisor()
-
-            local_queue = queue.Queue()
-
-            def on_progress(evt):
-                local_queue.put({"type": "progress", "event": evt})
-
-            def run_local_worker():
-                try:
-                    try:
-                        res = supervisor.run_investigation(query_target, progress_callback=on_progress)
-                    except TypeError:
-                        res = supervisor.run_investigation(query_target)
-                    local_queue.put({"type": "done", "results": res})
-                except Exception as exc:
-                    local_queue.put({"type": "error", "error": str(exc)})
-                finally:
-                    local_queue.put(None)
-
-            worker = threading.Thread(target=run_local_worker, daemon=True)
-            worker.start()
-
-            while True:
-                try:
-                    item = local_queue.get(timeout=1.2)
-                except queue.Empty:
-                    if not worker.is_alive():
-                        break
-                    handle_heartbeat(round(time.time() - run_start_ts, 1))
-                    continue
-
-                if item is None:
+        while True:
+            try:
+                item = local_queue.get(timeout=1.2)
+            except queue.Empty:
+                if not worker.is_alive():
                     break
-                item_type = item.get("type")
-                if item_type == "progress":
-                    handle_progress_event(item["event"])
-                elif item_type == "done":
-                    results = item.get("results", {})
-                    dossier = results.get("dossier")
-                    pdf_bytes = results.get("pdf_bytes")
-                    execution_time = results.get("execution_time")
-                elif item_type == "error":
-                    error_message = item.get("error")
-                    status.write(f"⚠️ Worker notice: {error_message}")
+                handle_heartbeat(round(time.time() - run_start_ts, 1))
+                continue
+            if item is None:
+                break
+            item_type = item.get("type")
+            if item_type == "progress":
+                handle_progress_event(item["event"])
+            elif item_type == "done":
+                results = item.get("results", {})
+                dossier = results.get("dossier")
+                pdf_bytes = results.get("pdf_bytes")
+                execution_time = results.get("execution_time")
+            elif item_type == "error":
+                error_message = item.get("error")
 
-        final_elapsed = float(execution_time) if execution_time else round(time.time() - run_start_ts, 1)
-        if dossier:
-            render_progress(100, "Research Supervisor", f"Intelligence dossier & PDF compiled in {final_elapsed:.1f}s.", final_elapsed, state="complete")
-            st.session_state["execution_logs"].append({
-                "elapsed": final_elapsed,
-                "agent": "Research Supervisor",
-                "message": "Intelligence dossier & PDF compiled.",
-                "status": "complete"
-            })
-            render_execution_log(final_elapsed)
-            status.update(label=f"🎯 Deep Investigation Complete in {final_elapsed:.1f}s (100%)!", state="complete", expanded=True)
-            st.session_state["active_research"] = {
-                "dossier": dossier,
-                "pdf_bytes": pdf_bytes,
-                "execution_time": final_elapsed,
-                "query_target": query_target
-            }
-        else:
-            render_progress(tracker["pct"], "Research Supervisor", error_message or "Investigation did not return a dossier.", final_elapsed, state="error")
-            status.update(label=f"⚠️ Investigation Interrupted ({tracker['pct']}%)", state="error", expanded=True)
+    final_elapsed = float(execution_time) if execution_time else round(time.time() - run_start_ts, 1)
+    if dossier:
+        render_progress(100, "Research Supervisor", f"Intelligence dossier & PDF compiled in {final_elapsed:.1f}s.", final_elapsed, state="complete")
+        st.session_state["execution_logs"].append({
+            "elapsed": final_elapsed,
+            "agent": "Research Supervisor",
+            "message": "Intelligence dossier & PDF compiled.",
+            "status": "complete"
+        })
+        render_execution_log(final_elapsed)
+        st.session_state["active_research"] = {
+            "dossier": dossier,
+            "pdf_bytes": pdf_bytes,
+            "execution_time": final_elapsed,
+            "query_target": query_target
+        }
+    else:
+        render_progress(tracker["pct"], "Research Supervisor", error_message or "Investigation did not return a dossier.", final_elapsed, state="error")
 
 
 # Render Active Dossier (Persisted in st.session_state so quick questions and chat never reset the screen)

@@ -425,6 +425,7 @@ EXECUTIVE_SUMMARY:
 STRATEGIC_OUTLOOK:
 [Detailed text]"""
 
+        emit("Research Supervisor", "Parent Director", "synthesizing", "Waiting at most 18 seconds for the executive synthesis provider...", progress=82, progress_cap=87)
         synthesis_text = self.generate_response(synthesis_prompt)
         
         exec_summary = ""
