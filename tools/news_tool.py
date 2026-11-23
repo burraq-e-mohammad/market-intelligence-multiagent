@@ -23,7 +23,9 @@ def classify_breaking_events(articles: List[Dict[str, str]]) -> Dict[str, List[s
 
     for a in articles:
         text = f"{a.get('title', '')} {a.get('snippet', '')}"
-        if gov_pattern.search(text):
+        source_text = f"{a.get('source', '')} {text}".lower()
+        has_official_governance_source = bool(re.search(r'\b(sec filing|company filing|board (?:appointed|reinstated)|official (?:announcement|statement)|investor relations)\b', source_text, re.IGNORECASE))
+        if gov_pattern.search(text) and (has_official_governance_source or re.search(r'\b(resigns?|stepped down|stepping down|appointed|named|exits?|ousted)\b', text, re.IGNORECASE)):
             governance.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")
         if reg_pattern.search(text):
             regulatory.append(f"{a.get('title')} ({a.get('source')}, {a.get('date')})")

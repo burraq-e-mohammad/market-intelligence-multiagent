@@ -42,13 +42,13 @@ class QualityAssuranceAgent:
                 continue
             val = re.sub(
                 r'\b(?:board(?:’s|s)?\s+unanimous\s+vote|unanimously\s+(?:reinstat\w*|reappoint\w*|vot\w*)|political\s+endorsement|former\s+president\s+.*(?:U-turn|u-turn)|Trump\s+U-turn|(?:reinstat\w*|reappoint\w*)\s+Jensen\s+Huang)\b[^.?!]*[.?!]?',
-                'The source headline alone is reported; it does not verify an executive or board action.',
+                'Source headline alone reported; no executive or board action is verified.',
                 val,
                 flags=re.IGNORECASE
             )
             val = re.sub(
                 r'\b(?:unanimous\s+board\s+vote|board\s+reinstates?|political\s+endorsement|Trump\s+U-turn|DC\s+U-turn)\b',
-                'reported headline claim',
+                'sensational headline claim',
                 val,
                 flags=re.IGNORECASE
             )

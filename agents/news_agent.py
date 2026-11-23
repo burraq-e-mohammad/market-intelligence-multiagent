@@ -63,6 +63,14 @@ Outline emerging risks, market vulnerabilities, export-control or regulatory inv
         verified_officers = (shared_state.get("verified_leadership") or []) if shared_state else []
 
         gov_events = list(dict.fromkeys(shared_gov + (detected_events.get("governance_events") or [])))
+        gov_events = [
+            event for event in gov_events
+            if not re.search(
+                r'\b(reinstat\w*|unanimous vote|trump|u-turn|political endorsement)\b',
+                event,
+                re.IGNORECASE
+            )
+        ]
         reg_risks = list(dict.fromkeys(shared_reg + (detected_events.get("regulatory_risks") or [])))
         comm_milestones = detected_events.get("commercial_milestones", [])
         earnings_disclosures = detected_events.get("earnings_disclosures", [])
