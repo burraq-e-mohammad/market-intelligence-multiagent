@@ -269,6 +269,8 @@ if "active_research" not in st.session_state:
     st.session_state["active_research"] = None
 if "qa_history" not in st.session_state:
     st.session_state["qa_history"] = {}
+if "execution_logs" not in st.session_state:
+    st.session_state["execution_logs"] = []
 
 target_input = st.text_input(
     "Enter Company Name or Stock Ticker:",
@@ -285,6 +287,7 @@ if execute_btn or preset:
         st.stop()
 
     progress_placeholder = st.empty()
+    log_placeholder = st.empty()
     run_start_ts = time.time()
     tracker = {
         "pct": 2,
@@ -294,6 +297,17 @@ if execute_btn or preset:
         "subagents_done": 0,
         "state": "running",
     }
+    st.session_state["execution_logs"] = []
+
+    def render_execution_log(elapsed_s):
+        rows = st.session_state["execution_logs"]
+        with log_placeholder.container():
+            with st.expander(f"Execution log ({len(rows)} events) — {elapsed_s:.1f}s elapsed", expanded=True):
+                if not rows:
+                    st.caption("Waiting for the first agent event...")
+                for log in rows[-30:]:
+                    icon = "✅" if log["status"] in ("completed", "complete") else "⚙️"
+                    st.caption(f"{icon} [{log['elapsed']:.1f}s] {log['agent']} — {log['message']} ")
 
     def infer_progress_and_cap(evt):
         explicit_pct = evt.get("progress")
@@ -389,6 +403,13 @@ if execute_btn or preset:
             tracker["agent"] = agent or tracker["agent"]
             tracker["message"] = msg or tracker["message"]
             render_progress(pct, tracker["agent"], tracker["message"], float(t), state="running")
+            st.session_state["execution_logs"].append({
+                "elapsed": float(t),
+                "agent": agent or "Multi-Agent System",
+                "message": msg or "Processing...",
+                "status": str(evt.get("status") or "running")
+            })
+            render_execution_log(float(t))
             status.update(label=f"🚀 Multi-Agent Team Investigating: '{query_target}' — {pct}% ({float(t):.1f}s)")
             status.write(f"⏱️ **[{float(t):.1f}s]** `[{pct}%]` `{agent}`: {msg}")
 
@@ -396,6 +417,7 @@ if execute_btn or preset:
             if tracker["pct"] < tracker["cap"]:
                 tracker["pct"] += 1
             render_progress(tracker["pct"], tracker["agent"], tracker["message"], float(elapsed_s), state="running")
+            render_execution_log(float(elapsed_s))
             status.update(label=f"🚀 Multi-Agent Team Investigating: '{query_target}' — {tracker['pct']}% ({float(elapsed_s):.1f}s)")
 
         # 1. Attempt Streaming Call to FastAPI Backend
@@ -447,11 +469,7 @@ if execute_btn or preset:
             import agents.biography_agent
             import agents.financial_agent
             import agents.news_agent
-            try:
-                import agents.qa_validator_agent
-            except ImportError:
-                agents.qa_validator_agent = None
-            import agents.qa_critic
+            import agents.qa_validator_agent
             import agents.supervisor
 
             importlib.reload(tools.schemas)
@@ -464,9 +482,7 @@ if execute_btn or preset:
             importlib.reload(agents.biography_agent)
             importlib.reload(agents.financial_agent)
             importlib.reload(agents.news_agent)
-            if agents.qa_validator_agent:
-                importlib.reload(agents.qa_validator_agent)
-            importlib.reload(agents.qa_critic)
+            importlib.reload(agents.qa_validator_agent)
             importlib.reload(agents.supervisor)
 
             from agents.supervisor import ResearchSupervisor
@@ -518,7 +534,14 @@ if execute_btn or preset:
         final_elapsed = float(execution_time) if execution_time else round(time.time() - run_start_ts, 1)
         if dossier:
             render_progress(100, "Research Supervisor", f"Intelligence dossier & PDF compiled in {final_elapsed:.1f}s.", final_elapsed, state="complete")
-            status.update(label=f"🎯 Deep Investigation Complete in {final_elapsed:.1f}s (100%)!", state="complete", expanded=False)
+            st.session_state["execution_logs"].append({
+                "elapsed": final_elapsed,
+                "agent": "Research Supervisor",
+                "message": "Intelligence dossier & PDF compiled.",
+                "status": "complete"
+            })
+            render_execution_log(final_elapsed)
+            status.update(label=f"🎯 Deep Investigation Complete in {final_elapsed:.1f}s (100%)!", state="complete", expanded=True)
             st.session_state["active_research"] = {
                 "dossier": dossier,
                 "pdf_bytes": pdf_bytes,
@@ -677,6 +700,13 @@ if active_research and active_research.get("dossier"):
         kpi3.metric("Trailing P/E", str(metrics.get("trailing_pe", metrics.get("pe_ratio", "N/A"))))
         kpi4.metric("Forward P/E", str(metrics.get("forward_pe", "N/A")))
         kpi5.metric("Consensus Rating", str(metrics.get("analyst_rating", "N/A")), delta=f"Target: {metrics.get('analyst_target_price', 'N/A')}")
+        st.markdown("#### Balance Sheet & Capital Efficiency")
+        b1, b2, b3, b4, b5 = st.columns(5)
+        b1.metric("Free Cash Flow", str(metrics.get("free_cash_flow", "N/A")))
+        b2.metric("Total Debt", str(metrics.get("total_debt", "N/A")))
+        b3.metric("Net Debt", str(metrics.get("net_debt", "N/A")))
+        b4.metric("ROIC", str(metrics.get("roic", "N/A")))
+        b5.metric("Debt / Equity", str(metrics.get("debt_to_equity", "N/A")))
     elif entity_type == "SUBSIDIARY":
         sub_kpis = resolved_entity.get("subsidiary_kpis") or metrics.get("subsidiary_kpis") or {}
         s1, s2, s3, s4 = st.columns(4)

@@ -381,6 +381,39 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
             margin_pct = f"{profit_margins * 100:.2f}%" if profit_margins is not None else "N/A"
             growth_pct = f"{revenue_growth * 100:+.2f}%" if revenue_growth is not None else "N/A"
             canonical_name = official_name or info.get("longName") or info.get("shortName") or query
+            verified_at = datetime.now(timezone.utc).isoformat()
+
+            # Pull live balance-sheet and cash-flow metrics when available.
+            balance_sheet = {}
+            cash_flow = {}
+            try:
+                balance_sheet = ticker.balance_sheet or {}
+                cash_flow = ticker.cashflow or {}
+            except Exception:
+                pass
+
+            def latest_statement_value(statement: Any, keys: List[str]) -> Optional[float]:
+                if statement is None:
+                    return None
+                try:
+                    if hasattr(statement, "empty") and statement.empty:
+                        return None
+                    for key in keys:
+                        if key in statement.index:
+                            values = statement.loc[key].dropna()
+                            if len(values):
+                                value = values.iloc[0]
+                                return float(value) if isinstance(value, (int, float)) else None
+                except Exception:
+                    pass
+                return None
+
+            total_debt = latest_statement_value(balance_sheet, ["Total Debt"])
+            total_cash = latest_statement_value(balance_sheet, ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"])
+            free_cash_flow = latest_statement_value(cash_flow, ["Free Cash Flow"])
+            roic = info.get("returnOnCapitalEmployed")
+            inventory = latest_statement_value(balance_sheet, ["Inventory"])
+            debt_to_equity = info.get("debtToEquity")
 
             # Extract live chart datasets
             chart_data = {}
@@ -437,6 +470,15 @@ def get_financial_metrics(query_or_symbol: str) -> Dict[str, Any]:
                     "revenue_growth_yoy": growth_pct,
                     "analyst_target_price": f"{target_mean_price:,.2f} {currency}" if target_mean_price else "N/A",
                     "analyst_rating": recommendation.upper() if recommendation else "N/A",
+                    "verified_at": verified_at,
+                    "data_source": "Yahoo Finance live/market filings feed",
+                    "total_debt": format_number(total_debt, currency=currency),
+                    "total_cash": format_number(total_cash, currency=currency),
+                    "net_debt": format_number((total_debt - total_cash) if isinstance(total_debt, (int, float)) and isinstance(total_cash, (int, float)) else None, currency=currency),
+                    "free_cash_flow": format_number(free_cash_flow, currency=currency),
+                    "roic": f"{roic * 100:.2f}%" if isinstance(roic, (int, float)) else "N/A",
+                    "inventory": format_number(inventory, currency=currency),
+                    "debt_to_equity": f"{debt_to_equity:.2f}" if isinstance(debt_to_equity, (int, float)) else "N/A",
                     "fiscal_calendar": fiscal_calendar,
                     "sec_officers": sec_officers,
                     "chart_data": chart_data

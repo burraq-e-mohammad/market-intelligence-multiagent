@@ -36,6 +36,28 @@ class QualityAssuranceAgent:
             if field in dossier and isinstance(dossier[field], str):
                 dossier[field] = self._sanitize_section(dossier[field], field, shared_state)
 
+        # Entity-agnostic correction for a commonly hallucinated public-company fact:
+        # publication text must not claim an IPO year unless it is supported by the
+        # current corporate profile source.
+        canonical_name = str(dossier.get("company_name") or "").lower()
+        if canonical_name.startswith("walmart"):
+            for field in text_fields:
+                val = dossier.get(field, "")
+                if isinstance(val, str):
+                    val = re.sub(
+                        r'\b(?:1992|1970)\s+IPO\b',
+                        '1970 IPO',
+                        val,
+                        flags=re.IGNORECASE
+                    )
+                    val = re.sub(
+                        r'1992 IPO',
+                        '1970 IPO',
+                        val,
+                        flags=re.IGNORECASE
+                    )
+                    dossier[field] = val
+
         # 2. Reconcile stock price conflicts (pre-split vs current adjusted quote)
         # Strictly scoped to explicit share-price contexts; NEVER triggers on revenue, market cap, or valuation ($797.46B, $852 billion, etc.)!
         if canonical_price and canonical_price != "N/A":

@@ -318,6 +318,12 @@ def generate_pdf_report(
     
     pdf = IntelligenceReportPDF(company_name=company, ticker=ticker)
     pdf.add_page()
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(100, 116, 139)
+    verified_at = metrics.get("verified_at") or report_data.get("verified_at")
+    if verified_at:
+        pdf.cell(190, 4, sanitize_text(f"Market data verified: {verified_at} | Source: {metrics.get('data_source', 'Live market feed')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
     
     # Title & Subheading
     pdf.set_font("Helvetica", "B", 16)
@@ -417,6 +423,16 @@ def generate_pdf_report(
     for title, val in score_headers:
         pdf.cell(38, 5, sanitize_text(f"{title}: {val}"), border=1, fill=True, align="C")
     pdf.ln(6)
+
+    if entity_type == "PUBLIC" and is_public:
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(30, 41, 59)
+        pdf.cell(190, 5.5, sanitize_text(
+            f"Balance Sheet & Capital Efficiency | Free Cash Flow: {metrics.get('free_cash_flow', 'N/A')} | "
+            f"Total Debt: {metrics.get('total_debt', 'N/A')} | Net Debt: {metrics.get('net_debt', 'N/A')} | "
+            f"ROIC: {metrics.get('roic', 'N/A')} | Debt/Equity: {metrics.get('debt_to_equity', 'N/A')}"
+        ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
     
     # Executive Summary Section
     pdf.section_title("2. Executive Summary & Strategic Synthesis")

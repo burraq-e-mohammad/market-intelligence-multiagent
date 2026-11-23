@@ -3,10 +3,7 @@ from agents.entity_resolver import EntityResolverAgent
 from agents.financial_agent import FinancialAnalystAgent
 from agents.news_agent import NewsScoutAgent
 from agents.biography_agent import BiographyAgent
-try:
-    from agents.qa_validator_agent import QualityAssuranceAgent
-except ImportError:
-    from agents.qa_critic import QualityAssuranceAgent
+from agents.qa_validator_agent import QualityAssuranceAgent
 from tools.finance_tool import get_financial_metrics
 from tools.wiki_tool import get_company_biography
 from tools.pdf_tool import generate_pdf_report
@@ -39,7 +36,7 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         self.financial_agent = FinancialAnalystAgent()
         self.news_agent = NewsScoutAgent()
         self.biography_agent = BiographyAgent()
-        self.qa_critic = QualityAssuranceAgent()
+        self.quality_assurance = QualityAssuranceAgent()
 
     def run_investigation(
         self,
@@ -548,7 +545,7 @@ STRATEGIC_OUTLOOK:
 
         # Step 4: Run QA Critic Node to audit cross-agent consistency & typography
         emit("QA Critic Agent", "Quality Assurance & Fact-Checking", "verifying", "Auditing dossier for Single Source of Truth consistency, tabular verification, and typography sanitization...", progress=88, progress_cap=93)
-        final_dossier = self.qa_critic.review_and_sanitize(final_dossier, shared_state)
+        final_dossier = self.quality_assurance.review_and_sanitize(final_dossier, shared_state)
 
         # Generate In-Memory Report (No disk files created)
         emit("Publisher", "PDF & Dossier Publisher", "publishing", "Compiling publication-grade in-memory PDF dossier...", progress=94, progress_cap=98)

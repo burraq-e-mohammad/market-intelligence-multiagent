@@ -51,6 +51,13 @@ def generate_csv_data_model(dossier: Dict[str, Any]) -> bytes:
         writer.writerow(["Operating Margin", metrics.get("operating_margins", metrics.get("profit_margins", "N/A")), "Operating profitability"])
         writer.writerow(["Net Profit Margin", metrics.get("profit_margins", "N/A"), "Net margin efficiency"])
         writer.writerow(["Analyst Consensus Rating", metrics.get("analyst_rating", "N/A"), f"Price Target: {metrics.get('analyst_target_price', 'N/A')}"])
+        writer.writerow(["Free Cash Flow", metrics.get("free_cash_flow", "N/A"), "Latest available cash-flow statement"])
+        writer.writerow(["Total Debt", metrics.get("total_debt", "N/A"), "Latest available balance sheet"])
+        writer.writerow(["Net Debt", metrics.get("net_debt", "N/A"), "Debt less available cash"])
+        writer.writerow(["ROIC", metrics.get("roic", "N/A"), "Return on invested capital"])
+        writer.writerow(["Debt / Equity", metrics.get("debt_to_equity", "N/A"), "Balance-sheet leverage"])
+        writer.writerow(["Data Source", metrics.get("data_source", "Live market feed"), "Provider"])
+        writer.writerow(["Verified At", metrics.get("verified_at", "N/A"), "UTC verification timestamp"])
     elif entity_type == "SUBSIDIARY":
         sub_kpis = resolved.get("subsidiary_kpis") or metrics.get("subsidiary_kpis") or {}
         writer.writerow(["Dimension", "Corporate Disclosure"])
