@@ -313,6 +313,68 @@ def fetch_wikipedia_infobox_officers(page_title: str) -> List[VerifiedOfficer]:
         pass
     return officers
 
+def fetch_wikipedia_infobox_identity(page_title: str) -> Dict[str, str]:
+    """Extract only explicitly labeled infobox headquarters, legal name, and parent fields."""
+    identity: Dict[str, str] = {}
+    try:
+        r = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "prop": "revisions",
+                "rvprop": "content",
+                "rvsection": "0",
+                "titles": page_title,
+                "format": "json"
+            },
+            headers={"User-Agent": "MarketIntelAgent/2.0 (contact@example.com)"},
+            timeout=5
+        )
+        if r.status_code != 200:
+            return identity
+        pages = r.json().get("query", {}).get("pages", {})
+        wikitext = ""
+        for pdata in pages.values():
+            revs = pdata.get("revisions", [])
+            if revs:
+                wikitext = revs[0].get("*", "") or revs[0].get("slots", {}).get("main", {}).get("*", "")
+                break
+        if not wikitext:
+            return identity
+
+        def clean_markup(value: str) -> str:
+            value = re.sub(r'<ref[^>]*>.*?</ref>', '', value, flags=re.DOTALL | re.IGNORECASE)
+            value = re.sub(r'<ref[^/]*/>', '', value, flags=re.IGNORECASE)
+            value = re.sub(r'\[\[([^\|\]]+)\|([^\]]+)\]\]', r'\2', value)
+            value = re.sub(r'\[\[([^\]]+)\]\]', r'\1', value)
+            value = re.sub(r'\{\{[^{}]*\}\}', '', value)
+            return re.sub(r"\s+", " ", value).strip(" *;.")
+
+        fields = {
+            "name": "legal_entity_name",
+            "hq_location_city": "headquarters_city",
+            "hq_location_country": "headquarters_country",
+            "parent": "parent_company"
+        }
+        for source_field, target_field in fields.items():
+            match = re.search(
+                r'\|\s*' + re.escape(source_field) + r'\s*=\s*(.*?)(?=\n\|\s*[a-zA-Z_]+\s*=|\n\}\})',
+                wikitext,
+                re.DOTALL | re.IGNORECASE
+            )
+            if match:
+                value = clean_markup(match.group(1))
+                if value:
+                    identity[target_field] = value
+
+        city = identity.pop("headquarters_city", "")
+        country = identity.pop("headquarters_country", "")
+        if city or country:
+            identity["headquarters"] = ", ".join(p for p in [city, country] if p)
+    except Exception:
+        return identity
+    return identity
+
 def extract_structured_entity_profile(page_title: str, summary: str, body: str) -> Dict[str, Any]:
     """
     Dynamically extracts verified corporate attributes from Wikipedia content for ANY entity:
@@ -322,6 +384,8 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
     """
     text = f"{summary}\n\n{body}"
     headquarters = ""
+    infobox_identity = fetch_wikipedia_infobox_identity(page_title)
+    headquarters = infobox_identity.get("headquarters") or headquarters
     hq_match = re.search(
         r'\b(?:headquartered in|headquarters (?:are|is)?\s*(?:in|at)?|headquarters:)\s*([A-Z][A-Za-z\s,\-]{3,100}?)(?:\.|;|\n)',
         text,
@@ -412,6 +476,7 @@ def extract_structured_entity_profile(page_title: str, summary: str, body: str) 
     return {
         "founding_info": founding_info,
         "headquarters": headquarters,
+        "infobox_identity": infobox_identity,
         "active_officers": [o.model_dump() for o in reconciled_officers],
         "verified_leadership": leadership[:6],
         "verified_acquisitions": acquisitions[:6],
@@ -690,7 +755,12 @@ def matches_resolved_entity_page(page, resolved_entity: Optional[Dict[str, Any]]
             return False
 
     # 2. Positive verification against stripped trade name (multi-word/distinct), headquarters, sector, or required anchors
-    hq_tokens = [t.strip().lower() for t in re.split(r'[,\s]+', resolved_entity.get("headquarters", "")) if len(t.strip()) >= 3 and t.strip().lower() != "global"]
+    headquarters_value = resolved_entity.get("headquarters", "")
+    hq_tokens = [] if headquarters_value.lower() in ("", "not verified", "undetermined", "global") else [
+        t.strip().lower()
+        for t in re.split(r'[,\s]+', headquarters_value)
+        if len(t.strip()) >= 3
+    ]
     sector_tokens = [t.strip().lower() for t in re.split(r'[\s,&/\-]+', resolved_entity.get("sector", "")) if len(t.strip()) >= 4 and t.strip().lower() not in ("services", "commercial", "solutions")]
     anchor_tokens = [a.lower() for a in (resolved_entity.get("required_search_anchors") or []) if len(a) >= 3]
     stripped_trade = _strip_legal_suffixes(resolved_entity.get("trade_name") or resolved_entity.get("canonical_name") or "").lower()

@@ -148,6 +148,16 @@ Never write a brief, shallow, or generic summary. Deliver comprehensive, structu
         )
 
         pre_profile = tool_bio.get("entity_profile", {})
+        infobox_identity = pre_profile.get("infobox_identity") or {}
+        if infobox_identity:
+            resolved_dict = resolved.model_dump()
+            if infobox_identity.get("legal_entity_name"):
+                resolved_dict["legal_entity_name"] = infobox_identity["legal_entity_name"]
+            if infobox_identity.get("parent_company"):
+                resolved_dict["parent_company"] = infobox_identity["parent_company"]
+            if infobox_identity.get("headquarters"):
+                resolved_dict["headquarters"] = infobox_identity["headquarters"]
+            resolved = ResolvedEntity(**resolved_dict)
         if pre_profile.get("headquarters"):
             resolved_dict = resolved.model_dump()
             resolved_dict["headquarters"] = pre_profile["headquarters"]

@@ -139,6 +139,7 @@ negative_keywords (list of 5-8 unrelated collision terms)."""
                         entity["ticker"] = None
                         entity["headquarters"] = "Not verified"
                         entity["ownership_pct"] = "Ownership structure not verified"
+                        entity["wikipedia_title"] = ""
                         entity["subsidiary_kpis"] = entity.get("subsidiary_kpis") or {
                             "reporting_basis": "Not disclosed",
                             "annual_revenue": "Not disclosed",
